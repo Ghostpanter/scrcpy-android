@@ -1,0 +1,168 @@
+scrcpy-android
+==============
+Native Android client that mirrors and controls another Android device over
+Wireless debugging. It forwards video, audio, touch, keys, and clipboard data
+through the scrcpy server. Neither device needs root.
+
+The source device running this app needs Android 12 or newer. The target needs
+Android 11 or newer with Wireless debugging enabled.
+
+
+Run
+---
+Build requirements are JDK 17, Android SDK platform 36, and build-tools 35.
+
+    ./scripts/update-server
+    ./gradlew :app:assembleDebug
+    adb install app/build/outputs/apk/debug/app-debug.apk
+
+On the target, open Settings, Developer options, Wireless debugging. Copy the
+displayed IP address and connection port. Open Pair device with pairing code
+and copy its separate pairing port and six-digit code.
+
+Enter those values in the source app and tap Pair and save. Pairing authorizes
+this app's stable ADB key on the target.
+
+Android may change the Wireless debugging port after Wireless debugging is
+toggled, adbd restarts, or the device reboots. Forget the stale row and pair
+again with the newly displayed address.
+
+
+Test
+----
+The host gate checks the Gradle wrapper and server inputs, runs both JVM test
+suites, and runs Android lint:
+
+    ./scripts/check
+
+The Docker entrypoint supplies its own JDK and Android SDK:
+
+    ./test unit
+    ./test server
+    ./test apk
+    ./test e2e
+    ./test all
+
+`unit` and `server` need Docker only. `server` builds and tests the pinned
+scrcpy source, then compares its executable dex with the bundled release.
+`apk` signs and verifies a minified release with a throwaway key. `e2e` needs
+read/write access to `/dev/kvm`; it boots two clean API 36 emulators and
+exercises Android's real pairing-code UI, the minified
+release client, mandatory TLS, Opus playback, SurfaceView rendering, and
+touch, key, and clipboard forwarding. It also checks automatic reconnect
+across both scrcpy and adbd restarts.
+
+`e2e` boots two emulators and drives real system UI, so it is slower and more
+timing-dependent than the rest of the gate. Every deadline is overridable if a
+host needs longer: `E2E_BOOT_DEADLINE`, `E2E_SETTLE_DEADLINE`,
+`E2E_UI_DEADLINE`, `E2E_ROTATE_DEADLINE`, `E2E_RESIZE_DEADLINE`.
+The disposable AVDs use a bounded 10 GiB tmpfs; allow roughly 16 GiB of
+available memory for the two emulators and their data.
+
+The screenshot tool also needs `/dev/kvm`:
+
+    ./test screenshots
+
+It replaces the tracked Fastlane screenshots only after checking their owner
+and dimensions.
+
+
+Release
+-------
+Set all four signing variables and run the release script:
+
+    export KEYSTORE_PATH=/absolute/path/release.p12
+    export KEYSTORE_PASS=...
+    export KEY_ALIAS=...
+    export KEY_PASS=...
+    ./scripts/build-apk
+
+The script verifies the wrapper and scrcpy server, builds the minified APK,
+checks its signature, 16 KiB page alignment, SDK levels, exact permission set,
+and exact ABI set with build-tools 35, then prints its SHA-256. The APK contains
+`arm64-v8a` and `x86_64` native libraries.
+
+Keep the signing keystore outside this repository. `.gitignore` cannot protect
+an arbitrary keystore filename.
+
+
+Debug
+-----
+All application logs use one tag:
+
+    adb logcat -s scrcpy-android
+
+A normal session includes these lines:
+
+    pair ok host=... pair_port=...
+    adb connect ok
+    push /data/local/tmp/scrcpy-server.jar bytes=...
+    spawn server ver=... scid=...
+    openAbstract scrcpy_... ok
+    video meta codec=h264
+    audio meta codec=opus
+    video sink: rendered frame n=1
+    audio sink: playback started
+
+Target-side scrcpy output is copied into the same log with the `server:`
+prefix. Uncaught exceptions are also written under the app-specific external
+files directory as `crash-*.log`; only the five newest files are retained.
+
+
+Security
+--------
+The app creates one software-backed RSA ADB identity in its private files
+directory. Pairing authenticates the six-digit-code exchange with SPAKE2 and
+authorizes that client key on the target. Later connections require TLS and
+the target rejects clients whose keys were not authorized.
+
+Android does not provide a stable target certificate to pin: its pairing
+server generates a fresh key and adbd uses a separate process-scoped key.
+Consequently the ADB protocol authenticates this client to the target, but
+does not cryptographically authenticate a later target to this client. TLS
+still protects against passive eavesdropping. Treat the saved address and the
+network carrying it as trusted.
+
+Clipboard synchronization is enabled by default and works in both directions.
+Disable it in Settings before connecting to a target that should not receive
+the source device's clipboard. Only explicit text clipboard items are synced.
+On Android 10 and newer, a source-side copy made in another app is forwarded
+when this app regains focus, because Android blocks background clipboard reads.
+
+Use a private network or VPN to reach a remote target. Do not expose a Wireless
+debugging port directly to the internet. The app performs no hidden network
+access; it connects only to the address selected by the user and downloads
+nothing at runtime.
+
+Backups and device-to-device transfer are disabled because private app data
+contains the ADB identity and saved target addresses. Crash logs may contain
+addresses and diagnostic data and are removed when the app is uninstalled.
+
+
+Source layout
+-------------
+`app/` contains the Android application. `vendor/libadb-android/` is a pruned,
+locally patched subset of libadb-android 3.1.1. `vendor/scrcpy` is a submodule
+pinned to the scrcpy release used for the server. `test-rig/` contains the
+Docker and emulator tests.
+
+The server binary is intentionally ignored by Git. `scripts/update-server`
+downloads the allow-listed scrcpy 4.1 artifact and verifies its SHA-256 before
+installing it. Every APK build verifies it again. The source-build equivalent
+used by F-Droid is explicit:
+
+    server=$(./scripts/build-server)
+    install -m 0644 "$server" app/src/main/assets/scrcpy-server.jar
+    sha256sum app/src/main/assets/scrcpy-server.jar \
+        | awk '{ print $1 }' >app/src/main/assets/scrcpy-server.sha256
+    ./gradlew :app:assembleRelease
+
+Vendor updates are manual because the ADB transport carries overlapping local
+security and flow-control changes. See `vendor/libadb-android/README.md`.
+
+
+License
+-------
+The application is Apache-2.0; see `LICENSE`. Bundled component notices,
+source locations, and LGPL relinking information are in
+`app/src/main/assets/THIRD_PARTY_NOTICES` and in the in-app Licenses screen.
