@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- AAPT requires adaptive icons to remain version-qualified. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore regexp="mipmap-anydpi-v26"/>
+    </issue>
+    <!-- AGP 8.13's tested wrapper is Gradle 8.13. Do not chase an
+         unvalidated wrapper merely because a newer Gradle exists. -->
+    <issue id="AndroidGradlePluginVersion">
+        <ignore regexp="gradle-wrapper.properties"/>
+    </issue>
+</lint>
