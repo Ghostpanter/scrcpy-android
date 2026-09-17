@@ -1,0 +1,78 @@
+#!/bin/sh
+# Download a pinned scrcpy-server.jar release, verify SHA-256 against an
+# in-script allow-list, and install it into app assets. Idempotent.
+#
+# Usage:
+#   scripts/update-server            # use DEFAULT_VERSION below
+#   scripts/update-server 4.1        # use explicit version
+#
+# Bumping to a new release:
+#   1. Run with the new version. The script will print the observed SHA-256
+#      and exit non-zero if it is not in the allow-list.
+#   2. Paste the printed line into the `case` below.
+#   3. Update DEFAULT_VERSION.
+#   4. Re-run. Commit the assets.
+
+set -eu
+
+DEFAULT_VERSION='4.1'
+VERSION="${1:-$DEFAULT_VERSION}"
+
+if ! printf '%s\n' "$VERSION" \
+        | awk '/^[0-9]+([.][0-9]+)*$/ { ok = 1 } END { exit !ok }'; then
+    echo "update-server: invalid version: $VERSION" >&2
+    exit 2
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSETS="$ROOT/app/src/main/assets"
+URL="https://github.com/Genymobile/scrcpy/releases/download/v$VERSION/scrcpy-server-v$VERSION"
+
+# Known-good SHA-256 sums. Keep one line per blessed version.
+EXPECTED=$(cat <<EOF
+4.1 deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae
+EOF
+)
+
+want=$(printf '%s\n' "$EXPECTED" | awk -v v="$VERSION" '$1==v {print $2}')
+if [ -z "$want" ]; then
+    echo "update-server: version $VERSION is not in the allow-list" >&2
+    echo "  to bless it, add this line to the EXPECTED block in this script:" >&2
+    echo "    $VERSION <sha256-of-the-downloaded-binary>" >&2
+fi
+
+if [ -f "$ASSETS/scrcpy-server.jar" ] \
+        && [ "$(cat "$ASSETS/scrcpy-server.version" 2>/dev/null || true)" = "$VERSION" ] \
+        && [ "$(sha256sum "$ASSETS/scrcpy-server.jar" | awk '{print $1}')" = "$want" ]; then
+    printf '%s\n' "$want" >"$ASSETS/scrcpy-server.sha256"
+    echo "update-server: already installed $ASSETS/scrcpy-server.jar v$VERSION"
+    exit 0
+fi
+
+mkdir -p "$ASSETS"
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+echo "update-server: GET $URL"
+curl -fsSL -o "$tmp" "$URL"
+
+got=$(sha256sum "$tmp" | awk '{print $1}')
+echo "update-server: sha256 $got"
+
+if [ -z "$want" ]; then
+    echo "update-server: refusing to install unverified jar" >&2
+    exit 1
+fi
+
+if [ "$got" != "$want" ]; then
+    echo "update-server: sha256 mismatch" >&2
+    echo "  want: $want" >&2
+    echo "  got:  $got" >&2
+    exit 1
+fi
+
+install -m 0644 "$tmp" "$ASSETS/scrcpy-server.jar"
+printf '%s\n' "$VERSION" >"$ASSETS/scrcpy-server.version"
+printf '%s\n' "$got"     >"$ASSETS/scrcpy-server.sha256"
+
+echo "update-server: installed $ASSETS/scrcpy-server.jar v$VERSION"
