@@ -1,0 +1,10 @@
+plugins {
+    id 'com.android.application' version '8.13.2' apply false
+    id 'com.android.library'     version '8.13.2' apply false
+}
+
+subprojects {
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs += ['-Xlint:deprecation', '-Xlint:unchecked']
+    }
+}

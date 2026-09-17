@@ -1,0 +1,31 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // JitPack is used only for libadb's SPAKE2 pairing bridge. Do not
+        // allow it to shadow artifacts available from the primary repos.
+        exclusiveContent {
+            forRepository {
+                maven { url = uri('https://jitpack.io') }
+            }
+            filter {
+                includeModule 'com.github.MuntashirAkon.spake2-java', 'spake2-android'
+            }
+        }
+    }
+}
+
+rootProject.name = 'scrcpy-android'
+
+include ':app'
+include ':adb'
+project(':adb').projectDir = new File(rootDir, 'vendor/libadb-android/libadb')
