@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single spacing scale and corner radii, referenced everywhere so the
+     layout rhythm stays consistent. -->
+<resources>
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">12dp</dimen>
+    <dimen name="space_lg">16dp</dimen>
+    <dimen name="space_xl">24dp</dimen>
+
+    <dimen name="card_radius">14dp</dimen>
+    <dimen name="field_radius">8dp</dimen>
+    <dimen name="button_radius">10dp</dimen>
+
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="touch_min">48dp</dimen>
+</resources>
