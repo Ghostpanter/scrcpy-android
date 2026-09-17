@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-3.0-or-later OR Apache-2.0
+
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    compileSdk 36
+    namespace = "io.github.muntashirakon.adb"
+
+    defaultConfig {
+        minSdk 31
+        targetSdk 36
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    compileOnly "androidx.annotation:annotation:1.9.1"
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.84'
+    implementation 'org.conscrypt:conscrypt-android:2.6.1'
+    implementation('com.github.MuntashirAkon.spake2-java:spake2-android:2.2.1') {
+        exclude group: 'androidx.annotation', module: 'annotation'
+    }
+
+    testImplementation 'junit:junit:4.13.2'
+}

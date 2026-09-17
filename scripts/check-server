@@ -1,0 +1,47 @@
+#!/bin/sh
+# Verify the scrcpy server asset against its tracked SHA-256 sidecar.
+
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSETS="$ROOT/app/src/main/assets"
+JAR="$ASSETS/scrcpy-server.jar"
+SUM="$ASSETS/scrcpy-server.sha256"
+VERSION="$ASSETS/scrcpy-server.version"
+
+for file in "$JAR" "$SUM" "$VERSION"; do
+    if [ ! -s "$file" ]; then
+        echo "check-server: $file is missing or empty" >&2
+        exit 1
+    fi
+done
+
+expected=$(cat "$SUM")
+case "$expected" in
+    *[!0-9a-f]*|'')
+        echo "check-server: invalid SHA-256 in $SUM" >&2
+        exit 1
+        ;;
+esac
+if [ "${#expected}" -ne 64 ]; then
+    echo "check-server: invalid SHA-256 length in $SUM" >&2
+    exit 1
+fi
+
+actual=$(sha256sum "$JAR" | awk '{ print $1 }')
+if [ "$actual" != "$expected" ]; then
+    echo "check-server: scrcpy-server.jar checksum mismatch" >&2
+    echo "  want: $expected" >&2
+    echo "  got:  $actual" >&2
+    exit 1
+fi
+
+if ! awk 'BEGIN { ok = 0 }
+        /^[0-9]+([.][0-9]+)*$/ { if (NR == 1) ok = 1; next }
+        { ok = 0 }
+        END { exit !(ok && NR == 1) }' "$VERSION"; then
+    echo "check-server: invalid version in $VERSION" >&2
+    exit 1
+fi
+version=$(cat "$VERSION")
+echo "check-server: ok ($version)"

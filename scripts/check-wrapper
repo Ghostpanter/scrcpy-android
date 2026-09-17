@@ -1,0 +1,42 @@
+#!/bin/sh
+# Verify the checked-in gradle-wrapper.jar matches the expected SHA-256.
+# Catches accidental swaps or supply-chain mischief.
+
+set -eu
+
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+
+WRAPPER='gradle/wrapper/gradle-wrapper.jar'
+EXPECTED_FILE="$WRAPPER.sha256"
+
+if [ ! -f "$WRAPPER" ]; then
+    echo "check-wrapper: $WRAPPER is missing" >&2
+    exit 1
+fi
+if [ ! -f "$EXPECTED_FILE" ]; then
+    echo "check-wrapper: $EXPECTED_FILE is missing" >&2
+    exit 1
+fi
+
+line=$(cat "$EXPECTED_FILE")
+expected=${line%  gradle-wrapper.jar}
+if [ "$line" != "$expected  gradle-wrapper.jar" ]; then
+    echo "check-wrapper: malformed $EXPECTED_FILE" >&2
+    exit 1
+fi
+case "$expected" in
+    *[!0-9a-f]*|'')
+        echo "check-wrapper: invalid SHA-256 in $EXPECTED_FILE" >&2
+        exit 1
+        ;;
+esac
+if [ "${#expected}" -ne 64 ]; then
+    echo "check-wrapper: invalid SHA-256 length in $EXPECTED_FILE" >&2
+    exit 1
+fi
+actual=$(sha256sum "$WRAPPER" | awk '{ print $1 }')
+if [ "$actual" != "$expected" ]; then
+    echo "check-wrapper: gradle-wrapper.jar checksum mismatch" >&2
+    exit 1
+fi
+echo "check-wrapper: ok"

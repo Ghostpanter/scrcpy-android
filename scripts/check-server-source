@@ -1,0 +1,27 @@
+#!/bin/sh
+# Build and test the pinned scrcpy server, then compare its executable dex
+# with the bundled upstream release.
+
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRCPY="$ROOT/vendor/scrcpy"
+OFFICIAL="$ROOT/app/src/main/assets/scrcpy-server.jar"
+
+"$ROOT/scripts/check-server"
+built=$("$ROOT/scripts/build-server")
+
+echo "check-server-source: unit, lint, checkstyle" >&2
+"$SCRCPY/gradlew" -p "$SCRCPY" --no-daemon \
+    :server:testDebugUnitTest :server:lint :server:checkstyle >&2
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+unzip -p "$OFFICIAL" classes.dex >"$tmp/official.dex"
+unzip -p "$built" classes.dex >"$tmp/source.dex"
+if ! cmp -s "$tmp/official.dex" "$tmp/source.dex"; then
+    echo "check-server-source: source dex differs from upstream release" >&2
+    sha256sum "$tmp/official.dex" "$tmp/source.dex" >&2
+    exit 1
+fi
+echo "check-server-source: ok"
