@@ -1,0 +1,2 @@
+emulator
+system-images;android-36;default;x86_64

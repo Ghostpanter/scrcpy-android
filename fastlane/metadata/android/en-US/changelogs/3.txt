@@ -1,0 +1,3 @@
+Project moved from Codeberg to GitLab. Source, issues, and the third-party
+source-availability notices now point at gitlab.com/0xlena/scrcpy-android.
+No functional changes.

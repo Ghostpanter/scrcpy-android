@@ -1,0 +1,5 @@
+First release.
+
+Mirror a second Android device over Wireless ADB: video, audio, touch, keys,
+and clipboard. Selectable video and audio codecs, screen recording, and
+automatic reconnection.

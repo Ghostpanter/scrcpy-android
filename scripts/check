@@ -1,0 +1,12 @@
+#!/bin/sh
+# Run the repository's host/VM quality gate.
+
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+"$ROOT/scripts/check-wrapper"
+"$ROOT/scripts/check-server"
+cd "$ROOT"
+"$ROOT/gradlew" --no-daemon :app:test :adb:test :app:lint
+"$ROOT/scripts/check-server-source"
