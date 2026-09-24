@@ -1,1 +1,184 @@
-PLACEHOLDER
+plugins {
+    id 'com.android.application'
+}
+
+import java.security.MessageDigest
+
+android {
+    namespace = 'com.ghostpanter.scrcpy'
+    compileSdk 37
+    // Pin build-tools explicitly so the aapt2/zipalign/d8 toolchain is
+    // fixed and builds stay reproducible, not whatever AGP defaults to.
+    // 35.0.0 is AGP 8.13's supported default.
+    buildToolsVersion '37.0.0'
+
+    defaultConfig {
+        // The published package id. Immutable across releases.
+        applicationId 'com.ghostpanter.scrcpy'
+        minSdk 31
+        targetSdk 37
+        versionCode 13
+        versionName '0.5.7-ghostpanter'
+    }
+
+    // AGP otherwise embeds a Google-signed dependency-metadata blob in the
+    // APK that is not byte-reproducible. Strip it so the build stays
+    // deterministic. This is the single most common reproducible-build
+    // breaker on AGP.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
+    // Release signing pulls credentials from the environment. Set all
+    // four of KEYSTORE_PATH / KEYSTORE_PASS / KEY_ALIAS / KEY_PASS and
+    // assembleRelease produces a signed APK. With any of them missing
+    // the release build is unsigned (Gradle's default); the same
+    // all-four condition gates the buildTypes wiring below so a
+    // half-set environment cannot select a half-populated config.
+    def signingReady = ['KEYSTORE_PATH', 'KEYSTORE_PASS', 'KEY_ALIAS', 'KEY_PASS']
+            .every { System.getenv(it) }
+    signingConfigs {
+        release {
+            if (signingReady) {
+                storeFile     file(System.getenv('KEYSTORE_PATH'))
+                storePassword System.getenv('KEYSTORE_PASS')
+                keyAlias      System.getenv('KEY_ALIAS')
+                keyPassword   System.getenv('KEY_PASS')
+            }
+        }
+    }
+
+    // Ship one ordinary APK containing both supported 64-bit ABIs. arm64
+    // covers physical devices; x86_64 covers emulators and ChromeOS without
+    // introducing split-APK installation logic.
+    buildTypes {
+        debug {
+            ndk {
+                abiFilters 'arm64-v8a', 'x86_64'
+            }
+        }
+        release {
+            // x86_64 is here so the emulator can install and RUN the
+            // minified artifact. Without it no tier ever executed the
+            // variant that ships, and an R8 misconfiguration - a keep
+            // rule that is too narrow, a reflective edge R8 could not
+            // see - would first show up on a user's device. It costs a
+            // second ABI in the APK and buys coverage of the only build
+            // that matters.
+            //
+            // This is why the APK is ~7.5 MB while the dex shrank: it
+            // carries two copies of libconscrypt_jni.so and libspake2.so,
+            // stored uncompressed and 16 KiB aligned for Android 15+ page
+            // sizes. Uncompressed native libraries inflate the download
+            // and shrink the installation, because they are mapped from
+            // the APK instead of being extracted. A single-ABI build is
+            // about 3.5 MB; splits would give users that without giving
+            // up the emulator coverage, and are the obvious next step if
+            // download size starts to matter.
+            ndk {
+                abiFilters 'arm64-v8a', 'x86_64'
+            }
+            minifyEnabled   true
+            shrinkResources = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                          'proguard-rules.pro'
+            if (signingReady) {
+                signingConfig = signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        // bouncycastle (transitive via :adb) is the dominant source of
+        // dead weight in the APK. Each entry below is dead code/data for
+        // our use case (we only call BC's asn1, crypto, util.encoders):
+        //   - picnic post-quantum lookup tables: ~1.2 MB of .properties
+        //   - cert-path-reviewer i18n messages: ~92 KB, en+de only
+        //   - duplicate META-INF licenses/notices: ordinary AGP cleanup
+        resources.excludes += [
+            'META-INF/LICENSE*',
+            'META-INF/NOTICE*',
+            'META-INF/versions/9/OSGI-INF/MANIFEST.MF',
+            'org/bouncycastle/pqc/crypto/picnic/**',
+            'org/bouncycastle/pqc/legacy/picnic/**',
+            'org/bouncycastle/x509/CertPathReviewerMessages*.properties',
+        ]
+    }
+
+    testOptions {
+        // android.util.Log and friends are stubs on the JVM unit-test
+        // classpath; let them return defaults instead of throwing.
+        unitTests.returnDefaultValues = true
+    }
+
+    sourceSets {
+        main.assets.srcDir '../vendor/libadb-android/LICENSES'
+    }
+
+    // Name APK after root project (scrcpy-android), not "app-debug.apk".
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach { output ->
+            def vName = variant.versionName ?: "dev"
+            output.outputFileName = "${rootProject.name}-${vName}-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+dependencies {
+    implementation project(':adb')
+    // bcprov is already pulled in transitively by :adb at runtime; we
+    // need it on the compile classpath too for Adb.java's ASN.1
+    // cert-builder. :adb keeps it 'implementation'-scoped upstream so
+    // we declare it explicitly here rather than patch the vendor tree.
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.84'
+    implementation 'com.google.zxing:core:3.5.3'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
+
+def serverJar = file('src/main/assets/scrcpy-server.jar')
+def serverSum = file('src/main/assets/scrcpy-server.sha256')
+def serverVersion = file('src/main/assets/scrcpy-server.version')
+def expectedServerSum = providers.gradleProperty('scrcpyServerSha256')
+        .orElse(providers.provider { serverSum.text.trim() })
+
+tasks.register('verifyScrcpyServer') {
+    inputs.files(serverJar, serverSum, serverVersion)
+    inputs.property('expectedChecksum', expectedServerSum)
+    doLast {
+        if (!serverJar.isFile() || !serverSum.isFile() || !serverVersion.isFile()) {
+            throw new GradleException('scrcpy server assets are incomplete; run scripts/update-server')
+        }
+        def expected = expectedServerSum.get()
+        def version = serverVersion.text.trim()
+        if (!(expected ==~ /[0-9a-f]{64}/)
+                || !(version ==~ /[0-9]+(\.[0-9]+)*/)) {
+            throw new GradleException('scrcpy server checksum or version is invalid')
+        }
+        def digest = MessageDigest.getInstance('SHA-256')
+        serverJar.withInputStream { input ->
+            byte[] buffer = new byte[64 * 1024]
+            for (int n; (n = input.read(buffer)) >= 0; ) {
+                if (n == 0) throw new GradleException('scrcpy server read made no progress')
+                digest.update(buffer, 0, n)
+            }
+        }
+        def actual = digest.digest().encodeHex().toString()
+        if (actual != expected) {
+            throw new GradleException("scrcpy server checksum mismatch: expected ${expected}, got ${actual}")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith('merge') && task.name.endsWith('Assets')) {
+        task.dependsOn tasks.named('verifyScrcpyServer')
+    }
+}
