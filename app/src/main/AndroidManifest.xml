@@ -73,6 +73,12 @@
             android:label="@string/licenses"
             android:theme="@style/Theme.Scrcpy.NoActionBar"/>
 
+        <activity
+            android:name=".Donate"
+            android:exported="false"
+            android:label="@string/donate"
+            android:theme="@style/Theme.Scrcpy.NoActionBar"/>
+
         <service
             android:name=".Sessions"
             android:exported="false"
