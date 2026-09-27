@@ -11,6 +11,7 @@ import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.hardware.display.VirtualDisplay;
+import android.hardware.display.VirtualDisplayConfig;
 import android.os.Handler;
 import android.view.Display;
 import android.view.Surface;
@@ -171,6 +172,29 @@ public final class DisplayManager {
     public VirtualDisplay createVirtualDisplay(String name, int width, int height, int displayIdToMirror, Surface surface) throws Exception {
         Method method = getCreateVirtualDisplayMethod();
         return (VirtualDisplay) method.invoke(null, name, width, height, displayIdToMirror, surface);
+    }
+
+    /**
+     * Mirror {@code displayIdToMirror} with {@code VIRTUAL_DISPLAY_FLAG_SECURE}.
+     * The public static helper only sets AUTO_MIRROR; secure capture of
+     * FLAG_SECURE layers (lock screen, banking, encrypted gallery) requires
+     * this flag plus a privileged caller (root / AID_SYSTEM).
+     */
+    public VirtualDisplay createSecureMirrorVirtualDisplay(String name, int width, int height, int displayIdToMirror,
+            Surface surface) throws Exception {
+        int flags = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+                | android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE;
+        VirtualDisplayConfig.Builder builder = new VirtualDisplayConfig.Builder(name, width, height, 1 /* densityDpi */)
+                .setFlags(flags)
+                .setSurface(surface);
+        // @SystemApi — present on Android 12+ framework, missing from public SDK stubs
+        Method setMirror = builder.getClass().getMethod("setDisplayIdToMirror", int.class);
+        setMirror.invoke(builder, displayIdToMirror);
+        Constructor<android.hardware.display.DisplayManager> ctor =
+                android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
+        ctor.setAccessible(true);
+        android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+        return dm.createVirtualDisplay(builder.build());
     }
 
     public VirtualDisplay createNewVirtualDisplay(String name, int width, int height, int dpi, Surface surface, int flags) throws Exception {

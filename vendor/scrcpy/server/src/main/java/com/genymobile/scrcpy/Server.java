@@ -276,16 +276,25 @@ public final class Server {
         }
     }
 
+    /**
+     * Keep real uid 0 when launched via su, but drop *effective* uid to shell
+     * (2000) for ordinary Binder calls (clipboard, settings, input).
+     * {@code setuid(2000)} would permanently lose root and make secure-display
+     * capture impossible on Android 12+. Use seteuid so ScreenCapture can
+     * temporarily restore euid 0 to create a FLAG_SECURE virtual display.
+     * Inspired by Genymobile/scrcpy#4947 (vvb2060).
+     */
     @SuppressWarnings("deprecation")
     private static void dropRootPrivileges() {
         try {
             if (Os.getuid() == 0) {
-                // Copy-paste does not work with root user
+                // Copy-paste does not work with root euid
                 // <https://github.com/Genymobile/scrcpy/issues/6224>
-                Os.setuid(2000);
+                Os.seteuid(2000);
+                Ln.i("Root retained (ruid=0); euid dropped to shell for Binder");
             }
         } catch (Exception e) {
-            Ln.w("Cannot set UID", e);
+            Ln.w("Cannot set EUID", e);
         }
     }
 }

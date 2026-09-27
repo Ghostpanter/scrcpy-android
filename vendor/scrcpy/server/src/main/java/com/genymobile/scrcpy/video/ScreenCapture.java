@@ -22,6 +22,8 @@ import com.genymobile.scrcpy.wrappers.SurfaceControl;
 import android.graphics.Rect;
 import android.hardware.display.VirtualDisplay;
 import android.os.Build;
+import android.system.Os;
+import android.system.ErrnoException;
 import android.os.IBinder;
 import android.view.Surface;
 
@@ -129,30 +131,55 @@ public class ScreenCapture extends SurfaceCapture {
             inputSize = videoSize;
         }
 
-        try {
-            virtualDisplay = ServiceManager.getDisplayManager()
-                    .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
-            Ln.d("Display: using DisplayManager API");
-        } catch (Exception displayManagerException) {
-            if (Build.BRAND.equalsIgnoreCase("oculus") && Build.MODEL.toLowerCase(Locale.ROOT).startsWith("quest")) {
-                // Workaround for buggy createVirtualDisplay on Quest
-                try {
-                    virtualDisplay = (VirtualDisplay) VirtualDisplay.class.getDeclaredConstructors()[0].newInstance(null, null, null, surface);
-                } catch (ReflectiveOperationException e) {
-                    Ln.e("Could not create VirtualDisplay", e);
-                }
-            } else {
-                try {
-                    display = createDisplay();
+        Exception firstFailure = null;
+        boolean root = isRealUidRoot();
+        if (root) {
+            // Privileged secure capture (Genymobile/scrcpy#4947 / #3049).
+            // Main thread already seteuid(2000); restore euid 0 for this call.
+            // surface may have been reassigned by the OpenGL filter above — capture final.
+            final Surface captureSurface = surface;
+            final Size captureInputSize = inputSize;
+            try {
+                runAsRootEuid(() -> openSecureDisplay(captureSurface, captureInputSize));
+                Ln.i("Display: secure capture enabled (ruid=0)");
+            } catch (Exception secureException) {
+                firstFailure = secureException;
+                Ln.w("Secure display creation failed, falling back", secureException);
+            }
+        }
 
-                    Size deviceSize = displayInfo.getSize();
-                    int layerStack = displayInfo.getLayerStack();
-                    setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
-                    Ln.d("Display: using SurfaceControl API");
-                } catch (Exception surfaceControlException) {
-                    Ln.e("Could not create display using DisplayManager", displayManagerException);
-                    Ln.e("Could not create display using SurfaceControl", surfaceControlException);
-                    throw new AssertionError("Could not create display");
+        if (virtualDisplay == null && display == null) {
+            try {
+                virtualDisplay = ServiceManager.getDisplayManager()
+                        .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+                Ln.d("Display: using DisplayManager API");
+            } catch (Exception displayManagerException) {
+                if (firstFailure == null) {
+                    firstFailure = displayManagerException;
+                }
+                if (Build.BRAND.equalsIgnoreCase("oculus") && Build.MODEL.toLowerCase(Locale.ROOT).startsWith("quest")) {
+                    // Workaround for buggy createVirtualDisplay on Quest
+                    try {
+                        virtualDisplay = (VirtualDisplay) VirtualDisplay.class.getDeclaredConstructors()[0]
+                                .newInstance(null, null, null, surface);
+                    } catch (ReflectiveOperationException e) {
+                        Ln.e("Could not create VirtualDisplay", e);
+                    }
+                } else {
+                    try {
+                        display = createDisplay(/* secure */ false);
+                        Size deviceSize = displayInfo.getSize();
+                        int layerStack = displayInfo.getLayerStack();
+                        setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
+                        Ln.d("Display: using SurfaceControl API");
+                    } catch (Exception surfaceControlException) {
+                        Ln.e("Could not create display using DisplayManager", displayManagerException);
+                        Ln.e("Could not create display using SurfaceControl", surfaceControlException);
+                        if (firstFailure != null) {
+                            Ln.e("Earlier secure attempt also failed", firstFailure);
+                        }
+                        throw new AssertionError("Could not create display");
+                    }
                 }
             }
         }
@@ -207,11 +234,67 @@ public class ScreenCapture extends SurfaceCapture {
         return true;
     }
 
-    private static IBinder createDisplay() throws Exception {
+    private void openSecureDisplay(Surface surface, Size inputSize) throws Exception {
+        // Prefer DisplayManager + VIRTUAL_DISPLAY_FLAG_SECURE (required on A14+;
+        // SurfaceControl.createDisplay is deprecated there). Fall back to
+        // SurfaceControl secure display on older APIs.
+        try {
+            virtualDisplay = ServiceManager.getDisplayManager().createSecureMirrorVirtualDisplay(
+                    "scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+            Ln.d("Display: using DisplayManager API (SECURE)");
+            return;
+        } catch (Exception displayManagerException) {
+            Ln.d("DisplayManager SECURE failed: " + displayManagerException.getMessage());
+            display = createDisplay(/* secure */ true);
+            Size deviceSize = displayInfo.getSize();
+            int layerStack = displayInfo.getLayerStack();
+            setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
+            Ln.d("Display: using SurfaceControl API (SECURE)");
+        }
+    }
+
+    private static boolean isRealUidRoot() {
+        try {
+            return Os.getuid() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @FunctionalInterface
+    private interface RootAction {
+        void run() throws Exception;
+    }
+
+    private static void runAsRootEuid(RootAction action) throws Exception {
+        int previous = Os.geteuid();
+        try {
+            if (previous != 0) {
+                Os.seteuid(0);
+            }
+            action.run();
+        } catch (ErrnoException e) {
+            throw new IOException("seteuid(0) failed", e);
+        } finally {
+            if (previous != 0) {
+                try {
+                    Os.seteuid(previous);
+                } catch (ErrnoException e) {
+                    Ln.w("Failed to restore euid=" + previous, e);
+                }
+            }
+        }
+    }
+
+    private static IBinder createDisplay(boolean secure) throws Exception {
         // Since Android 12 (preview), secure displays could not be created with shell permissions anymore.
         // On Android 12 preview, SDK_INT is still R (not S), but CODENAME is "S".
-        boolean secure = Build.VERSION.SDK_INT < AndroidVersions.API_30_ANDROID_11 || (Build.VERSION.SDK_INT == AndroidVersions.API_30_ANDROID_11
-                && !"S".equals(Build.VERSION.CODENAME));
+        // When running as real root we request secure=true so FLAG_SECURE layers are mirrored.
+        if (!secure) {
+            secure = Build.VERSION.SDK_INT < AndroidVersions.API_30_ANDROID_11
+                    || (Build.VERSION.SDK_INT == AndroidVersions.API_30_ANDROID_11
+                    && !"S".equals(Build.VERSION.CODENAME));
+        }
         return SurfaceControl.createDisplay("scrcpy", secure);
     }
 

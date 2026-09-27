@@ -14,3 +14,7 @@ app/src/main/assets/scrcpy-server.jar
 # ADB identity files are runtime secrets; never check them in.
 adbkey
 adbcert
+
+# Vendor scrcpy offline AGP mirror (rebuild host only)
+vendor/scrcpy/local-maven/
+vendor/scrcpy/local.properties

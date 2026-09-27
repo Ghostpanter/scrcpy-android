@@ -1,0 +1,28 @@
+#!/bin/sh
+# Build vendor/scrcpy server (with Ghostpanter secure-capture patches) and
+# install it into app/src/main/assets as scrcpy-server.jar (+ sha256/version).
+#
+# Replaces scripts/update-server for this fork: we intentionally ship a
+# patched jar (seteuid + VIRTUAL_DISPLAY_FLAG_SECURE), not the upstream
+# release binary.
+
+set -eu
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ASSETS="$ROOT/app/src/main/assets"
+VERSION_FILE="$ASSETS/scrcpy-server.version"
+VERSION=$(cat "$VERSION_FILE")
+
+built=$("$ROOT/scripts/build-server")
+if [ ! -s "$built" ]; then
+    echo "install-patched-server: empty build output" >&2
+    exit 1
+fi
+
+install -m 0644 "$built" "$ASSETS/scrcpy-server.jar"
+got=$(sha256sum "$ASSETS/scrcpy-server.jar" | awk '{print $1}')
+printf '%s\n' "$got" >"$ASSETS/scrcpy-server.sha256"
+printf '%s\n' "$VERSION" >"$ASSETS/scrcpy-server.version"
+
+echo "install-patched-server: installed $ASSETS/scrcpy-server.jar v$VERSION"
+echo "install-patched-server: sha256 $got"

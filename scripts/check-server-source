@@ -1,12 +1,12 @@
 #!/bin/sh
-# Build and test the pinned scrcpy server, then compare its executable dex
-# with the bundled upstream release.
+# Build and test the pinned (patched) scrcpy server, then compare its
+# executable dex with the bundled asset. They must match.
 
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRCPY="$ROOT/vendor/scrcpy"
-OFFICIAL="$ROOT/app/src/main/assets/scrcpy-server.jar"
+ASSET="$ROOT/app/src/main/assets/scrcpy-server.jar"
 
 "$ROOT/scripts/check-server"
 built=$("$ROOT/scripts/build-server")
@@ -17,11 +17,11 @@ echo "check-server-source: unit, lint, checkstyle" >&2
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
-unzip -p "$OFFICIAL" classes.dex >"$tmp/official.dex"
+unzip -p "$ASSET" classes.dex >"$tmp/asset.dex"
 unzip -p "$built" classes.dex >"$tmp/source.dex"
-if ! cmp -s "$tmp/official.dex" "$tmp/source.dex"; then
-    echo "check-server-source: source dex differs from upstream release" >&2
-    sha256sum "$tmp/official.dex" "$tmp/source.dex" >&2
+if ! cmp -s "$tmp/asset.dex" "$tmp/source.dex"; then
+    echo "check-server-source: asset dex differs from built source" >&2
+    sha256sum "$tmp/asset.dex" "$tmp/source.dex" >&2
     exit 1
 fi
-echo "check-server-source: ok"
+echo "check-server-source: ok (patched server matches asset)"

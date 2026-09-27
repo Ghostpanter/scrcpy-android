@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.9-ghostpanter` |
-| versionCode | `20` |
+| versionName | `0.5.10-ghostpanter` |
+| versionCode | `21` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -76,6 +76,34 @@ the repo under `/workspace/secrets/`).
 - The broken unsigned v0.5.9 asset never installed, so most users only
   need a fresh install of the replaced asset.
 
+
+
+
+### Secure capture / elevate (vc21 / 0.5.10)
+
+**Root cause of elevate-OK but lock/secure still black:** stock scrcpy-server 4.1
+calls `Os.setuid(2000)` at startup (irreversible) and creates a virtual display
+**without** `VIRTUAL_DISPLAY_FLAG_SECURE` / `createDisplay(secure=true)`. So Magisk
+uid=0 never helped FLAG_SECURE on Android 12+ — the server dropped root before
+capture and never asked for secure layers. Log clue: `feature-secure-playback=0`
+with normal home frames but black lock/banking.
+
+**Code fix (pinned server 4.1, Ghostpanter patch):**
+1. `Server.dropRootPrivileges`: `seteuid(2000)` instead of `setuid(2000)` — keep ruid=0.
+2. `ScreenCapture`: when `getuid()==0`, temporarily `seteuid(0)` and create a
+   secure mirror via `DisplayManager` (`AUTO_MIRROR|SECURE`) or SurfaceControl
+   `createDisplay(secure=true)` (vvb2060 / Genymobile#4947 approach).
+3. Client: clipboard flood guard (skip >4096 chars + 2s dedupe); throttle encoder
+   reset on video-sink overflow to ≥2s.
+
+**Honesty / OEM caveat:** On some Android 14/16 OEM builds (incl. HyperOS), even
+AID_SYSTEM/root secure virtual displays can still black-out lock/secure apps.
+Then Magisk + LSPosed + **Disable FLAG_SECURE** (or equivalent Zygisk module) is
+required — not bundled. Blind unlock keypad remains as non-root fallback.
+
+**Build patched server jar:** `./scripts/install-patched-server` (not
+`update-server`, which fetches stock upstream). Asset stays gitignored; rebuild
+before `assembleRelease`.
 
 ### Elevate / connect (vc20)
 

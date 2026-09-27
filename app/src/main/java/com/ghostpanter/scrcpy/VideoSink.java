@@ -34,6 +34,7 @@ public final class VideoSink implements VideoFrames {
     private static final int MAX_PENDING = 8;
     private static final int MAX_FRAME_BYTES = 8 * 1024 * 1024;
     private static final int MAX_PENDING_BYTES = 16 * 1024 * 1024;
+    private static final long MIN_ENCODER_RESET_INTERVAL_MS = 2_000L;
 
     private volatile Surface surface;
     private final Runnable onFatalError;
@@ -60,6 +61,7 @@ public final class VideoSink implements VideoFrames {
     // sends it once per run. VideoStream hands us a fresh array per frame,
     // so holding the reference is enough.
     private byte[] lastConfig;
+    private volatile long lastEncoderResetAtMs;
 
     public VideoSink(Surface surface, Runnable onFatalError, Runnable requestVideoReset) {
         this.surface = surface;
@@ -233,8 +235,14 @@ public final class VideoSink implements VideoFrames {
             }
         }
         if (reset && requestVideoReset != null) {
-            Log.w("video sink: input queue overflow, resetting encoder");
-            requestVideoReset.run();
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastEncoderResetAtMs < MIN_ENCODER_RESET_INTERVAL_MS) {
+                Log.w("video sink: input queue overflow, reset throttled");
+            } else {
+                lastEncoderResetAtMs = now;
+                Log.w("video sink: input queue overflow, resetting encoder");
+                requestVideoReset.run();
+            }
         }
     }
 

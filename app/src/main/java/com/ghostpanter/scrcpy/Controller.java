@@ -34,6 +34,12 @@ public final class Controller implements ControlStream.InboundSink {
     // than a one-shot boolean, cannot consume an unrelated user clipboard
     // change when Android delays or omits our own callback.
     private final AtomicReference<String> remoteClipboardText = new AtomicReference<>();
+    // Dedup / size guard: some OEMs (and autosync loops) re-fire the same
+    // multi-KB clip dozens of times per second, flooding the control socket
+    // ("clipboard to target 23778 chars") and starving video.
+    private static final int MAX_SYNC_CLIPBOARD_CHARS = 4096;
+    private final AtomicReference<String> lastSentClipboardText = new AtomicReference<>();
+    private volatile long lastSentClipboardAtMs;
 
     public Controller(Context ctx, Consumer<byte[]> sender) {
         this.sender = sender;
@@ -73,6 +79,11 @@ public final class Controller implements ControlStream.InboundSink {
             Log.i("clipboard from target ignored: sync is off");
             return;
         }
+        if (text.length() > MAX_SYNC_CLIPBOARD_CHARS) {
+            Log.w("clipboard from target truncated: %d -> %d chars",
+                    text.length(), MAX_SYNC_CLIPBOARD_CHARS);
+            text = text.substring(0, MAX_SYNC_CLIPBOARD_CHARS);
+        }
         Log.i("clipboard from target: %d chars", text.length());
         remoteClipboardText.set(text);
         try {
@@ -97,8 +108,20 @@ public final class Controller implements ControlStream.InboundSink {
         if (cs == null) return;
         String text = cs.toString();
         if (text.equals(remoteClipboardText.get())) return;
+        if (text.length() > MAX_SYNC_CLIPBOARD_CHARS) {
+            Log.w("clipboard to target skipped: %d chars > %d limit",
+                    text.length(), MAX_SYNC_CLIPBOARD_CHARS);
+            return;
+        }
+        String last = lastSentClipboardText.get();
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (text.equals(last) && (now - lastSentClipboardAtMs) < 2_000L) {
+            return; // same payload within 2s — ignore OEM/autosync re-fires
+        }
         remoteClipboardText.set(null);
         if (sendSetClipboard(text, false)) {
+            lastSentClipboardText.set(text);
+            lastSentClipboardAtMs = now;
             Log.i("clipboard to target: %d chars", cs.length());
         }
     }
