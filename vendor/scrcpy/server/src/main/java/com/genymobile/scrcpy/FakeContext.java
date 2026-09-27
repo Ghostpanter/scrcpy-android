@@ -20,6 +20,7 @@ public final class FakeContext extends ContextWrapper {
     public static final String PACKAGE_NAME = "com.android.shell";
     public static final String ROOT_PACKAGE_NAME = "android";
     public static final int ROOT_UID = 0; // Like android.os.Process.ROOT_UID, but before API 29
+    public static final int SYSTEM_UID = 1000; // Process.SYSTEM_UID / AID_SYSTEM
 
     private static final FakeContext INSTANCE = new FakeContext();
 
@@ -28,10 +29,8 @@ public final class FakeContext extends ContextWrapper {
     }
 
     /**
-     * DisplayManager on Android 16+ checks that the calling package matches the
-     * owner of the calling uid. With ruid retained as 0 (seteuid-only drop),
-     * {@code com.android.shell} mismatches uid 0; use {@code android}/ROOT_UID.
-     * When running as shell (uid 2000), keep the stock shell identity.
+     * Real uid is still 0 after Magisk elevate + seteuid drop. Used by
+     * ScreenCapture to decide whether a privileged secure-VD attempt is possible.
      */
     public static boolean isRootUid() {
         try {
@@ -44,8 +43,29 @@ public final class FakeContext extends ContextWrapper {
         return Process.myUid() == 0;
     }
 
+    /**
+     * Binder / DisplayManager identity follows euid on Android. Prefer the
+     * effective uid so packageName validation matches:
+     * <ul>
+     *   <li>euid 1000 → package {@code android} (AID_SYSTEM owns it)</li>
+     *   <li>euid 0 → package {@code android} (often rejected: uid 0 owns no pkg)</li>
+     *   <li>euid 2000 → {@code com.android.shell}</li>
+     * </ul>
+     */
+    public static int binderIdentityUid() {
+        try {
+            return Os.geteuid();
+        } catch (Throwable ignored) {
+            return Process.myUid();
+        }
+    }
+
     public static String currentPackageName() {
-        return isRootUid() ? ROOT_PACKAGE_NAME : PACKAGE_NAME;
+        int euid = binderIdentityUid();
+        if (euid == SYSTEM_UID || euid == ROOT_UID) {
+            return ROOT_PACKAGE_NAME;
+        }
+        return PACKAGE_NAME;
     }
 
     private final ContentResolver contentResolver = new ContentResolver(this) {
@@ -97,9 +117,21 @@ public final class FakeContext extends ContextWrapper {
     @TargetApi(AndroidVersions.API_31_ANDROID_12)
     @Override
     public AttributionSource getAttributionSource() {
-        boolean root = isRootUid();
-        AttributionSource.Builder builder = new AttributionSource.Builder(root ? ROOT_UID : Process.SHELL_UID);
-        builder.setPackageName(root ? ROOT_PACKAGE_NAME : PACKAGE_NAME);
+        int euid = binderIdentityUid();
+        int attrUid;
+        String pkg;
+        if (euid == SYSTEM_UID) {
+            attrUid = SYSTEM_UID;
+            pkg = ROOT_PACKAGE_NAME;
+        } else if (euid == ROOT_UID) {
+            attrUid = ROOT_UID;
+            pkg = ROOT_PACKAGE_NAME;
+        } else {
+            attrUid = Process.SHELL_UID;
+            pkg = PACKAGE_NAME;
+        }
+        AttributionSource.Builder builder = new AttributionSource.Builder(attrUid);
+        builder.setPackageName(pkg);
         return builder.build();
     }
 

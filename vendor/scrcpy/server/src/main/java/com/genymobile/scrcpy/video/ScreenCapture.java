@@ -133,110 +133,10 @@ public class ScreenCapture extends SurfaceCapture {
             inputSize = videoSize;
         }
 
-        Exception firstFailure = null;
-        boolean root = isRealUidRoot();
-        if (root) {
-            // Privileged secure capture (Genymobile/scrcpy#4947 / #3049).
-            // Main thread already seteuid(2000); restore euid 0 for this call.
-            // surface may have been reassigned by the OpenGL filter above — capture final.
-            // Always try secure once while ruid==0; user wants secure when it works.
-            final Surface captureSurface = surface;
-            final Size captureInputSize = inputSize;
-            try {
-                runAsRootEuid(() -> openSecureDisplay(captureSurface, captureInputSize));
-                Ln.i("Display: secure capture enabled (ruid=0)");
-            } catch (Exception secureException) {
-                firstFailure = secureException;
-                Ln.w("Secure display creation failed, falling back", secureException);
-            }
-        }
-
-        // On A16, SurfaceControl.createDisplay is gone. If secure already failed
-        // under ruid=0, HyperOS OEM DisplayManager still rejects packageName vs
-        // uid — skip futile non-secure DM/SC attempts and go to setuid sooner.
-        boolean skipNonSecureFallbacks = root
-                && virtualDisplay == null
-                && display == null
-                && firstFailure != null
-                && !SurfaceControl.hasCreateDisplayMethod();
-        if (skipNonSecureFallbacks) {
-            Ln.i("Display: SurfaceControl unavailable and secure failed; skipping non-secure fallbacks");
-        }
-
-        if (!skipNonSecureFallbacks && virtualDisplay == null && display == null) {
-            try {
-                virtualDisplay = ServiceManager.getDisplayManager()
-                        .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
-                Ln.d("Display: using DisplayManager API");
-            } catch (Exception displayManagerException) {
-                if (firstFailure == null) {
-                    firstFailure = displayManagerException;
-                }
-                if (Build.BRAND.equalsIgnoreCase("oculus") && Build.MODEL.toLowerCase(Locale.ROOT).startsWith("quest")) {
-                    // Workaround for buggy createVirtualDisplay on Quest
-                    try {
-                        virtualDisplay = (VirtualDisplay) VirtualDisplay.class.getDeclaredConstructors()[0]
-                                .newInstance(null, null, null, surface);
-                    } catch (ReflectiveOperationException e) {
-                        Ln.e("Could not create VirtualDisplay", e);
-                    }
-                } else {
-                    try {
-                        display = createDisplay(/* secure */ false);
-                        Size deviceSize = displayInfo.getSize();
-                        int layerStack = displayInfo.getLayerStack();
-                        setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
-                        Ln.d("Display: using SurfaceControl API");
-                    } catch (Exception surfaceControlException) {
-                        Ln.e("Could not create display using DisplayManager", displayManagerException);
-                        Ln.e("Could not create display using SurfaceControl", surfaceControlException);
-                        if (firstFailure != null) {
-                            Ln.e("Earlier secure attempt also failed", firstFailure);
-                        }
-                        // Do not AssertionError here — setuid(2000) safety net below.
-                    }
-                }
-            }
-        }
-
-        // Safety net (HyperOS / Android 16): if still no display while retaining
-        // ruid=0, permanently drop to shell like stock scrcpy and retry once.
-        // Guarantees vc20-like connectivity when FakeContext/package fixes are
-        // incomplete on some OEMs. Secure capture is abandoned after this.
-        //
-        // Server.dropRootPrivileges() only did seteuid(2000), so euid is already
-        // 2000 here. Linux setuid() requires euid==0 (or CAP_SETUID); calling
-        // setuid(2000) with euid=2000 fails. Restore euid first, then drop both.
-        if (virtualDisplay == null && display == null && isRealUidRoot()) {
-            Ln.i("Display: falling back to setuid(2000) after root display create failed");
-            try {
-                int beforeRuid = Os.getuid();
-                int beforeEuid = Os.geteuid();
-                Ln.i("Display: before drop ruid=" + beforeRuid + " euid=" + beforeEuid);
-                // must restore euid first — currently euid is 2000
-                Os.seteuid(0);
-                // permanently drop ruid+euid to shell
-                Os.setuid(2000);
-                Workarounds.updateFakePackageName(FakeContext.PACKAGE_NAME); // com.android.shell
-                Ln.i("Display: after drop ruid=" + Os.getuid() + " euid=" + Os.geteuid());
-            } catch (ErrnoException e) {
-                throw new IOException("seteuid(0)/setuid(2000) failed after display create failure", e);
-            }
-            try {
-                virtualDisplay = ServiceManager.getDisplayManager()
-                        .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
-                Ln.i("Display: using DisplayManager API after setuid(2000)");
-            } catch (Exception afterSetuidException) {
-                Ln.e("Could not create display after setuid(2000)", afterSetuidException);
-                if (firstFailure != null) {
-                    Ln.e("Earlier secure attempt also failed", firstFailure);
-                }
-                throw new IOException("Could not create display", afterSetuidException);
-            }
-        }
+        Exception firstFailure = tryOpenDisplay(surface, inputSize);
 
         if (virtualDisplay == null && display == null) {
-            throw new IOException("Could not create display");
+            throw new IOException("Could not create display", firstFailure);
         }
 
         if (vdListener != null) {
@@ -253,6 +153,136 @@ public class ScreenCapture extends SurfaceCapture {
                 virtualDisplayId = virtualDisplay.getDisplay().getDisplayId();
             }
             vdListener.onNewVirtualDisplay(virtualDisplayId, positionMapper);
+        }
+    }
+
+    /**
+     * Try secure (AID_SYSTEM / root), then non-secure DM/SC, then setuid(2000).
+     * Returns the first failure for diagnostics (may be null on success).
+     */
+    private Exception tryOpenDisplay(Surface surface, Size inputSize) throws IOException {
+        Exception firstFailure = null;
+        boolean root = isRealUidRoot();
+        if (root) {
+            firstFailure = trySecureCapture(surface, inputSize);
+        }
+
+        // On A16, SurfaceControl.createDisplay is gone. If secure already failed
+        // under ruid=0, HyperOS OEM DisplayManager still rejects packageName vs
+        // uid — skip futile non-secure DM/SC attempts and go to setuid sooner.
+        boolean skipNonSecureFallbacks = root
+                && virtualDisplay == null
+                && display == null
+                && firstFailure != null
+                && !SurfaceControl.hasCreateDisplayMethod();
+        if (skipNonSecureFallbacks) {
+            Ln.i("Display: SurfaceControl unavailable and secure failed; skipping non-secure fallbacks");
+        }
+
+        if (!skipNonSecureFallbacks && virtualDisplay == null && display == null) {
+            firstFailure = tryNonSecureDisplay(surface, inputSize, firstFailure);
+        }
+
+        if (virtualDisplay == null && display == null && isRealUidRoot()) {
+            firstFailure = fallBackToShellUid(surface, inputSize, firstFailure);
+        }
+        return firstFailure;
+    }
+
+    /**
+     * Privileged secure capture (Genymobile/scrcpy#4947 / #3049).
+     * Prefer AID_SYSTEM (1000): DisplayManager validates packageName against
+     * Binder callingUid, and package "android" is owned by uid 1000 — not
+     * uid 0 — so seteuid(0) alone hits "packageName must match the owner uid"
+     * on A14+/HyperOS.
+     */
+    private Exception trySecureCapture(Surface surface, Size inputSize) {
+        try {
+            runAsEuid(FakeContext.SYSTEM_UID, () -> openSecureDisplay(surface, inputSize));
+            Ln.i("Display: secure capture enabled (euid=AID_SYSTEM)");
+            return null;
+        } catch (Exception systemException) {
+            Ln.w("Secure display via AID_SYSTEM failed, trying euid=0", systemException);
+            try {
+                runAsEuid(0, () -> openSecureDisplay(surface, inputSize));
+                Ln.i("Display: secure capture enabled (euid=0)");
+                return null;
+            } catch (Exception rootException) {
+                Ln.w("Secure display creation failed, falling back", rootException);
+                return systemException;
+            }
+        }
+    }
+
+    private Exception tryNonSecureDisplay(Surface surface, Size inputSize, Exception firstFailure) {
+        try {
+            virtualDisplay = ServiceManager.getDisplayManager()
+                    .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+            Ln.d("Display: using DisplayManager API");
+            return firstFailure;
+        } catch (Exception displayManagerException) {
+            if (firstFailure == null) {
+                firstFailure = displayManagerException;
+            }
+            if (Build.BRAND.equalsIgnoreCase("oculus") && Build.MODEL.toLowerCase(Locale.ROOT).startsWith("quest")) {
+                // Workaround for buggy createVirtualDisplay on Quest
+                try {
+                    virtualDisplay = (VirtualDisplay) VirtualDisplay.class.getDeclaredConstructors()[0]
+                            .newInstance(null, null, null, surface);
+                } catch (ReflectiveOperationException e) {
+                    Ln.e("Could not create VirtualDisplay", e);
+                }
+                return firstFailure;
+            }
+            try {
+                display = createDisplay(/* secure */ false);
+                Size deviceSize = displayInfo.getSize();
+                int layerStack = displayInfo.getLayerStack();
+                setDisplaySurface(display, surface, deviceSize.toRect(), inputSize.toRect(), layerStack);
+                Ln.d("Display: using SurfaceControl API");
+            } catch (Exception surfaceControlException) {
+                Ln.e("Could not create display using DisplayManager", displayManagerException);
+                Ln.e("Could not create display using SurfaceControl", surfaceControlException);
+                if (firstFailure != null) {
+                    Ln.e("Earlier secure attempt also failed", firstFailure);
+                }
+                // Do not AssertionError here — setuid(2000) safety net below.
+            }
+            return firstFailure;
+        }
+    }
+
+    /**
+     * Safety net (HyperOS / Android 16): if still no display while retaining
+     * ruid=0, permanently drop to shell like stock scrcpy and retry once.
+     * Server.dropRootPrivileges() only did seteuid(2000), so restore euid
+     * before setuid (Linux requires euid==0 / CAP_SETUID).
+     */
+    private Exception fallBackToShellUid(Surface surface, Size inputSize, Exception firstFailure)
+            throws IOException {
+        Ln.i("Display: falling back to setuid(2000) after root display create failed");
+        try {
+            int beforeRuid = Os.getuid();
+            int beforeEuid = Os.geteuid();
+            Ln.i("Display: before drop ruid=" + beforeRuid + " euid=" + beforeEuid);
+            Os.seteuid(0);
+            Os.setuid(2000);
+            Workarounds.updateFakePackageName(FakeContext.PACKAGE_NAME); // com.android.shell
+            Ln.i("Display: after drop ruid=" + Os.getuid() + " euid=" + Os.geteuid());
+        } catch (ErrnoException e) {
+            throw new IOException("seteuid(0)/setuid(2000) failed after display create failure", e);
+        }
+        try {
+            virtualDisplay = ServiceManager.getDisplayManager()
+                    .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+            Ln.i("Display: using DisplayManager API after setuid(2000)");
+            return firstFailure;
+        } catch (Exception afterSetuidException) {
+            Ln.e("Could not create display after setuid(2000)", afterSetuidException);
+            if (firstFailure != null) {
+                Ln.e("Earlier secure attempt also failed", firstFailure);
+            }
+            throw new IOException("Could not create display", afterSetuidException);
         }
     }
 
@@ -293,9 +323,10 @@ public class ScreenCapture extends SurfaceCapture {
         // Prefer DisplayManager + VIRTUAL_DISPLAY_FLAG_SECURE (required on A14+;
         // SurfaceControl.createDisplay is deprecated/removed on A16). Fall back to
         // SurfaceControl secure display only when the method still exists.
+        int dpi = displayInfo != null ? displayInfo.getDpi() : 160;
         try {
             virtualDisplay = ServiceManager.getDisplayManager().createSecureMirrorVirtualDisplay(
-                    "scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+                    "scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface, dpi);
             Ln.d("Display: using DisplayManager API (SECURE)");
             return;
         } catch (Exception displayManagerException) {
@@ -325,23 +356,45 @@ public class ScreenCapture extends SurfaceCapture {
         void run() throws Exception;
     }
 
-    private static void runAsRootEuid(RootAction action) throws Exception {
+    /**
+     * Temporarily seteuid({@code targetEuid}) for a privileged binder call,
+     * sync FakeContext / ActivityThread package to match, then restore.
+     * Requires ruid==0 (Magisk). targetEuid 1000 = AID_SYSTEM.
+     */
+    private static void runAsEuid(int targetEuid, RootAction action) throws Exception {
         int previous = Os.geteuid();
+        String previousPkg = FakeContext.currentPackageName();
         try {
-            if (previous != 0) {
-                Os.seteuid(0);
+            if (previous != targetEuid) {
+                // May need euid 0 first when current euid is 2000 and target is 1000
+                // (seteuid to non-ruid from non-root euid can fail without CAP_SETUID).
+                if (previous != 0 && targetEuid != 0) {
+                    Os.seteuid(0);
+                }
+                Os.seteuid(targetEuid);
             }
+            String pkg = (targetEuid == FakeContext.SYSTEM_UID || targetEuid == 0)
+                    ? FakeContext.ROOT_PACKAGE_NAME
+                    : FakeContext.PACKAGE_NAME;
+            Workarounds.updateFakePackageName(pkg);
+            Ln.d("Display: runAsEuid target=" + targetEuid
+                    + " now euid=" + Os.geteuid()
+                    + " pkg=" + FakeContext.currentPackageName());
             action.run();
         } catch (ErrnoException e) {
-            throw new IOException("seteuid(0) failed", e);
+            throw new IOException("seteuid(" + targetEuid + ") failed", e);
         } finally {
-            if (previous != 0) {
-                try {
+            try {
+                if (Os.geteuid() != previous) {
+                    if (Os.geteuid() != 0 && previous != 0) {
+                        Os.seteuid(0);
+                    }
                     Os.seteuid(previous);
-                } catch (ErrnoException e) {
-                    Ln.w("Failed to restore euid=" + previous, e);
                 }
+            } catch (ErrnoException e) {
+                Ln.w("Failed to restore euid=" + previous, e);
             }
+            Workarounds.updateFakePackageName(previousPkg);
         }
     }
 

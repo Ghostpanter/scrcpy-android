@@ -47,7 +47,7 @@
     <string name="bit_rate_16m">16 Mbps</string>
     <string name="reconnect">重新连接</string>
     <string name="disconnect">断开连接</string>
-    <string name="elevate_root_ok">已获 Root，server 以 ruid=0 启动并请求安全层捕获；锁屏/安全页应可显示（普通镜像无需 LSPosed；部分 HyperOS/OEM A14–16 锁屏/安全页仍可能需 LSPosed）。</string>
+    <string name="elevate_root_ok">已获 Root，server 以 ruid=0 启动；将优先尝试 AID_SYSTEM 安全虚拟显示捕获锁屏/安全页，失败则自动回退普通镜像（连接不中断）。部分 HyperOS/Android 16 仍可能需 LSPosed+Disable FLAG_SECURE。</string>
     <string name="elevate_su_denied">提权失败：Magisk 未授权或超时。安全层仍为黑屏。请在被控端允许 shell/ADB 后点重新连接。</string>
     <string name="elevate_su_unavailable">未检测到可用 su（无 Root/Magisk）。安全层仍为黑屏；可用「解锁」盲输 PIN，或安装 Magisk 并开启 Root 提权。</string>
     <string name="elevate_fallback">提权失败仍黑屏：未能以 uid 0 启动 server，已回退普通 shell。请打开「设置→日志」查看完整 probe/start 报错；确认 Magisk 已允许 Shell 后点重新连接。</string>
@@ -178,13 +178,13 @@
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">安全内容 / Root / Shizuku</string>
     <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏/图案请先在手机上操作。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用在镜像中仍为黑屏，无法远程预览加密相册。</string>
-    <string name="secure_content_root">Root（推荐）：开启「Root 提权捕获安全层」后，若被控端 su 可用，将以 ruid=0 启动已修补 server（请求安全层捕获），多数机型可镜像锁屏与加密相册；失败则回退普通 shell。普通镜像无需 LSPosed。部分 HyperOS/Android 14–16 即便 Root 锁屏/安全页仍可能黑屏，此时需 Magisk+LSPosed+Disable FLAG_SECURE（本应用不附带）。</string>
+    <string name="secure_content_root">Root（推荐）：开启「Root 提权捕获安全层」后，若被控端 su 可用，将以 ruid=0 启动已修补 server，并优先用 AID_SYSTEM（euid=1000）创建带 VIRTUAL_DISPLAY_FLAG_SECURE 的镜像；失败自动回退 shell，普通画面仍可用。普通镜像无需 LSPosed。HyperOS/Android 16 上若锁屏/加密相册仍黑屏，需 Magisk+LSPosed+Disable FLAG_SECURE（本应用不附带）。</string>
 
     <string name="secure_content_shizuku">Shizuku（本机 shell）：可在本控制端授权 Shizuku，便于本机 shell 能力。Shizuku 仅为 shell uid，不能替代被控端 Root；Android 12+ 被控端锁屏/加密相册的 FLAG_SECURE 仍需被控端 Root 提权。无线 ADB 路径始终可用。</string>
 
     <string name="root_capture_secure">Root 提权捕获安全层（su）</string>
 
-    <string name="root_capture_secure_help">默认开启。连接时会在被控端请求 su（Magisk 可能弹窗或对 ADB shell 自动授权）。成功后以保留 ruid=0 的方式启动已修补的 scrcpy-server（请求安全虚拟显示），用于镜像 FLAG_SECURE 锁屏与安全页；失败会明确提示并回退普通 shell。普通镜像无需 LSPosed。若部分 HyperOS/Android 14–16 锁屏/安全页仍黑屏，需另装 Magisk+LSPosed+Disable FLAG_SECURE（本应用不附带）。</string>
+    <string name="root_capture_secure_help">默认开启。连接时会在被控端请求 su（Magisk 可能弹窗或对 ADB shell 自动授权）。成功后保留 ruid=0，优先以 AID_SYSTEM 创建安全虚拟显示以镜像 FLAG_SECURE；失败会回退普通 shell，不影响普通画面连接。若 HyperOS/Android 16 锁屏/安全页仍黑屏，需另装 Magisk+LSPosed+Disable FLAG_SECURE（本应用不附带）。</string>
 
     <string name="prefer_shizuku">启用 Shizuku（本机）</string>
 

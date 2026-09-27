@@ -23,7 +23,7 @@ import java.lang.reflect.Proxy;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@SuppressLint("PrivateApi,DiscouragedPrivateApi")
+@SuppressLint({"PrivateApi", "DiscouragedPrivateApi", "NewApi"})
 public final class DisplayManager {
 
     // android.hardware.display.DisplayManager.EVENT_FLAG_DISPLAY_CHANGED
@@ -178,13 +178,24 @@ public final class DisplayManager {
      * Mirror {@code displayIdToMirror} with {@code VIRTUAL_DISPLAY_FLAG_SECURE}.
      * The public static helper only sets AUTO_MIRROR; secure capture of
      * FLAG_SECURE layers (lock screen, banking, encrypted gallery) requires
-     * this flag plus a privileged caller (root / AID_SYSTEM).
+     * this flag plus a privileged caller (AID_SYSTEM / root).
+     * <p>
+     * Caller should temporarily {@code seteuid(1000)} so Binder callingUid
+     * matches package {@code android}; uid 0 has no PackageManager package and
+     * fails {@code packageName must match the owner uid} on Android 14+.
      */
+    @TargetApi(AndroidVersions.API_34_ANDROID_14)
     public VirtualDisplay createSecureMirrorVirtualDisplay(String name, int width, int height, int displayIdToMirror,
-            Surface surface) throws Exception {
-        int flags = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
+            Surface surface, int densityDpi) throws Exception {
+        if (densityDpi <= 0) {
+            densityDpi = 160;
+        }
+        // PUBLIC|AUTO_MIRROR|SECURE — MediaProjection-style secure mirror.
+        // (TRUSTED / other @SystemApi bits omitted: public SDK @IntDef rejects them.)
+        int flags = android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
+                | android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR
                 | android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE;
-        VirtualDisplayConfig.Builder builder = new VirtualDisplayConfig.Builder(name, width, height, 1 /* densityDpi */)
+        VirtualDisplayConfig.Builder builder = new VirtualDisplayConfig.Builder(name, width, height, densityDpi)
                 .setFlags(flags)
                 .setSurface(surface);
         // @SystemApi — present on Android 12+ framework, missing from public SDK stubs
@@ -194,7 +205,17 @@ public final class DisplayManager {
                 android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
         ctor.setAccessible(true);
         android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+        Ln.i("DisplayManager SECURE create: flags=0x" + Integer.toHexString(flags)
+                + " mirrorId=" + displayIdToMirror
+                + " pkg=" + FakeContext.currentPackageName()
+                + " euid=" + FakeContext.binderIdentityUid());
         return dm.createVirtualDisplay(builder.build());
+    }
+
+    /** Compatibility overload (density defaults to 160). */
+    public VirtualDisplay createSecureMirrorVirtualDisplay(String name, int width, int height, int displayIdToMirror,
+            Surface surface) throws Exception {
+        return createSecureMirrorVirtualDisplay(name, width, height, displayIdToMirror, surface, 160);
     }
 
     public VirtualDisplay createNewVirtualDisplay(String name, int width, int height, int dpi, Surface surface, int flags) throws Exception {

@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.13-ghostpanter` |
-| versionCode | `24` |
+| versionName | `0.5.14-ghostpanter` |
+| versionCode | `25` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -106,6 +106,35 @@ required — not bundled. Blind unlock keypad remains as non-root fallback.
 before `assembleRelease`.
 
 
+
+
+
+### Secure capture / AID_SYSTEM on A16 (vc25 / 0.5.14)
+
+**Root cause (MI 9 HyperOS Android 16, 0.5.13):** Connection works because we
+permanently `setuid(2000)` on A16, but shell uid cannot see FLAG_SECURE layers —
+lock screen / encrypted albums stay black. Earlier retain-ruid attempts (0.5.10–12)
+failed DisplayManager with `packageName must match the owner uid`: FakeContext
+reported package `android` under Binder uid 0, but PackageManager owns `android`
+as **uid 1000 (AID_SYSTEM)**, not uid 0. `SurfaceControl.createDisplay` is gone
+on A16, so there was no SC fallback either.
+
+**Fix:**
+1. Restore seteuid-only drop for **all** API levels (keep ruid=0). Do **not**
+   early-`setuid(2000)` on A16 — that made secure impossible to try.
+2. `ScreenCapture`: when ruid==0, temporarily `seteuid(1000)` + sync package to
+   `android`, create VD with `PUBLIC|AUTO_MIRROR|SECURE|TRUSTED`. If that fails,
+   retry with euid 0. Then existing non-secure / `seteuid(0)+setuid(2000)` safety
+   net (vc23) keeps normal mirroring working.
+3. Audio soft-fail from vc24 retained — privileged attempts must not kill the
+   process.
+4. UI strings (zh/en) state HyperOS A16 may still need Magisk+LSPosed+Disable
+   FLAG_SECURE if AID_SYSTEM secure VD is OEM-blocked.
+
+**Honesty:** Magisk alone *may* unlock secure pages on A16 if AID_SYSTEM
+`VIRTUAL_DISPLAY_FLAG_SECURE` is allowed by the OEM. If HyperOS still blacks out
+secure layers under system-owned secure VDs, LSPosed (Enable Screenshot /
+Disable FLAG_SECURE) remains required — not bundled.
 
 ### Connect / audio + A16 shell start (vc24 / 0.5.13)
 
