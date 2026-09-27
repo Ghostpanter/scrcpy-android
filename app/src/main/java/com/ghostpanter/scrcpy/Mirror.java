@@ -3,6 +3,7 @@ package com.ghostpanter.scrcpy;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
@@ -361,28 +362,49 @@ public final class Mirror extends Activity {
     private void showElevateStatus(Server.ElevateStatus status) {
         if (status == null || status == Server.ElevateStatus.DISABLED) return;
         int res;
+        boolean offerLogs = false;
         switch (status) {
             case ROOT:
                 res = R.string.elevate_root_ok;
                 break;
             case DENIED:
                 res = R.string.elevate_su_denied;
+                offerLogs = true;
                 break;
             case UNAVAILABLE:
                 res = R.string.elevate_su_unavailable;
+                offerLogs = true;
                 break;
             case FALLBACK:
                 res = R.string.elevate_fallback;
+                offerLogs = true;
                 break;
             default:
                 return;
         }
-        Toast.makeText(this, res, Toast.LENGTH_LONG).show();
-        // Also surface waiting/denied on the status pill while connecting.
+        String msg = getString(res);
+        // Long toast still truncates on many OEMs — also show a dialog with
+        // an explicit「查看日志」action so the ring-buffer transcript is reachable.
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
         if (statusText != null && state == State.CONNECTING
                 && status != Server.ElevateStatus.ROOT) {
-            statusText.setText(getString(res));
+            statusText.setText(msg);
+            if (offerLogs) {
+                statusText.setOnClickListener(v -> openLogViewer());
+            }
         }
+        if (offerLogs) {
+            new AlertDialog.Builder(this)
+                    .setMessage(msg + "\n\n" + getString(R.string.elevate_open_logs_hint))
+                    .setPositiveButton(R.string.elevate_fallback_view_logs,
+                            (d, w) -> openLogViewer())
+                    .setNegativeButton(android.R.string.ok, null)
+                    .show();
+        }
+    }
+
+    private void openLogViewer() {
+        startActivity(new android.content.Intent(this, LogViewerActivity.class));
     }
 
     private void reconnect() {

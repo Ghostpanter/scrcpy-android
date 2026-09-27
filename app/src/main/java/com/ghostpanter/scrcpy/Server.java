@@ -39,6 +39,12 @@ public final class Server {
     // (avoids quoting breakage on long CLASSPATH=... app_process lines).
     private static final String REMOTE_START   = "/data/local/tmp/scrcpy-gp-start.sh";
     private static final String REMOTE_PROBE   = "/data/local/tmp/scrcpy-gp-probe.sh";
+    // Written by elevated start script; polled via a *separate* shell so we
+    // do not depend on Magisk/su forwarding stdout through ADB shell:cmd
+    // (non-TTY + often fully buffered until process exit — and app_process
+    // never exits, so a banner-only check falsely FALLBACKs despite Magisk
+    // already granting shell).
+    private static final String REMOTE_UID     = "/data/local/tmp/scrcpy-gp-uid";
     private static final int    SCRIPT_MODE    = 0100755;         // regular file, 0755
     private static final String ASSET_JAR      = "scrcpy-server.jar";
     private static final String ASSET_VERSION  = "scrcpy-server.version";
@@ -51,8 +57,9 @@ public final class Server {
     private static final long   SU_QUICK_MS = 1_500L;
     // Only used when the quick probe hangs (first grant / Magisk dialog).
     private static final long   SU_PROMPT_MS = 60_000L;
-    // Elevated start banner: short when already granted, then extend to SU_PROMPT_MS.
-    private static final long   ELEVATE_UID_QUICK_MS = 2_000L;
+    // Elevated start uid confirm: short when already granted, then extend.
+    private static final long   ELEVATE_UID_QUICK_MS = 2_500L;
+    private static final long   ELEVATE_UID_POLL_MS = 120L;
     public static final class Streams {
         public final AdbStream    videoAds, audioAds, controlAds;
         public final InputStream  videoIn, audioIn, controlIn;
@@ -92,13 +99,19 @@ public final class Server {
     }
 
     private volatile ElevateStatus elevateStatus = ElevateStatus.DISABLED;
-    /** Which elevate wrapper succeeded in probe: "su0" or "su_c". */
+    /** Which elevate wrapper succeeded: probe form or start recipe name. */
     private String suForm;
+    /** Last elevate failure transcript (for toast / log viewer). */
+    private volatile String lastElevateDetail = "";
     /** Fired when we enter the long Magisk-grant wait (not on already-granted quick path). */
     private volatile Runnable onWaitingForGrant;
 
     public ElevateStatus elevateStatus() {
         return elevateStatus;
+    }
+
+    public String lastElevateDetail() {
+        return lastElevateDetail == null ? "" : lastElevateDetail;
     }
 
     public void setOnWaitingForGrant(Runnable r) {
@@ -133,29 +146,33 @@ public final class Server {
         // appeared and we silently fell back to shell — FLAG_SECURE stayed
         // black. Wait long enough for an interactive grant.
         boolean wantElevate = Settings.rootCaptureSecure(ctx);
+        lastElevateDetail = "";
         if (wantElevate) {
             SuProbeResult probe = probeSu();
             if (probe == SuProbeResult.OK) {
                 String scid = newScid();
                 String plain = buildCmdline(version, scid);
-                String elevated = elevateCmd(plain);
-                Log.i("spawn server (root) ver=%s scid=%s form=%s", version, scid, suForm);
-                Log.i("cmdline: %s", elevated);
+                pushElevatedStartScript(plain);
+                Log.i("spawn server (root) ver=%s scid=%s probeForm=%s", version, scid, suForm);
                 try {
-                    Streams streams = spawnAndConnect(elevated, scid, /*expectRoot*/ true);
+                    Streams streams = tryElevatedRecipes(scid);
                     elevateStatus = ElevateStatus.ROOT;
                     return streams;
                 } catch (Exception e) {
-                    Log.w("server: root elevate failed, falling back to shell: %s", e);
+                    lastElevateDetail = String.valueOf(e.getMessage());
+                    Log.w("server: root elevate FAILED all recipes — falling back to shell. detail=%s",
+                            lastElevateDetail);
                     closeShell();
                     serverEof = false;
                     elevateStatus = ElevateStatus.FALLBACK;
                 }
             } else if (probe == SuProbeResult.DENIED) {
                 elevateStatus = ElevateStatus.DENIED;
+                lastElevateDetail = "su denied/timeout form=" + suForm;
                 Log.i("server: su denied/timeout; using shell (secure layers will stay black)");
             } else {
                 elevateStatus = ElevateStatus.UNAVAILABLE;
+                lastElevateDetail = "su unavailable";
                 Log.i("server: root capture on but su not available; using shell");
             }
         }
@@ -164,25 +181,16 @@ public final class Server {
         String cmd = buildCmdline(version, scid);
         Log.i("spawn server ver=%s scid=%s", version, scid);
         Log.i("cmdline: %s", cmd);
-        return spawnAndConnect(cmd, scid, /*expectRoot*/ false);
+        return spawnAndConnect(cmd, scid);
     }
 
-    private Streams spawnAndConnect(String cmd, String scid, boolean expectRoot) throws Exception {
+    private Streams spawnAndConnect(String cmd, String scid) throws Exception {
         AdbStream va = null, aa = null, ca = null;
         boolean committed = false;
         try {
             shell = adb.openShell(cmd);
             AdbStream shellRef = shell;
             InputStream shellIn = shellRef.openInputStream();
-            if (expectRoot) {
-                // Confirm the *start* path is uid 0 (not merely that probe worked).
-                // Magisk may prompt again on this second su; wait + surface UI.
-                int uid = awaitElevatedUid(shellIn);
-                if (uid != 0) {
-                    throw new IOException("elevated spawn not uid 0 (got " + uid + ")");
-                }
-                Log.i("server: elevated start confirmed uid=0 form=%s", suForm);
-            }
             shellPump = new Thread(() -> pump(shellIn), "server-stdout");
             shellPump.setDaemon(true);
             shellPump.start();
@@ -190,7 +198,7 @@ public final class Server {
             // These accepts are ordered. If one times out, the whole ADB
             // connection is discarded by Session; retrying an individual
             // open could shift video/audio/control onto the wrong sockets.
-            long acceptDeadline = expectRoot ? LISTENER_DEADLINE_ELEVATED_MS : LISTENER_DEADLINE_MS;
+            long acceptDeadline = LISTENER_DEADLINE_MS;
             va = openAbstract(scid, acceptDeadline);
             aa = openAbstract(scid, acceptDeadline);
             ca = openAbstract(scid, acceptDeadline);
@@ -214,30 +222,162 @@ public final class Server {
         }
     }
 
-    // Magisk / KernelSU: prefer `su -c` (portable); Magisk also accepts `su 0 -c`.
-    // Push a short start script so Magisk's Superuser UI sees a stable path and
-    // we avoid quoting hazards on the long CLASSPATH/app_process line.
+    // Magisk / KernelSU elevate.
     //
-    // Critical: ADB `shell:cmd` has no TTY, so the script's stdout is fully
-    // buffered. A plain `echo` + `exec app_process` discards the buffered
-    // banner — awaitElevatedUid never sees scrcpy-gp:uid=0 even when probe
-    // already got uid 0, and we falsely FALLBACK despite Magisk granting
-    // shell. Flush via a child that exits (and mirror to stderr, unbuffered
-    // on bionic) before exec. Keep this AdbStream open for the server life.
-    private String elevateCmd(String plain) throws Exception {
+    // Probe may already see uid 0 (Magisk Superuser shows shell ALLOWED), yet
+    // awaitElevatedUid still missed the start banner: ADB shell:cmd is
+    // non-TTY, Magisk's su -c often fully-buffers stdout until process exit,
+    // and exec app_process never exits → false FALLBACK / 提权失败仍黑屏.
+    //
+    // vc19: write uid to REMOTE_UID from the elevated script, then poll that
+    // file via a *separate* non-elevated shell. Also try several start recipes
+    // (su -c / su 0 -c / Magisk path / nsenter / interactive su stdin). Every
+    // probe+start transcript goes into the Log ring buffer — never silent.
+    private void pushElevatedStartScript(String plain) throws Exception {
         String body = "#!/system/bin/sh\n"
+                + "UF=" + REMOTE_UID + "\n"
+                + "rm -f \"$UF\" \"$UF.tmp\"\n"
                 + "uid=$(/system/bin/id -u 2>/dev/null || id -u)\n"
-                + "/system/bin/sh -c \"echo scrcpy-gp:uid=$uid\"\n"
-                + "echo scrcpy-gp:uid=$uid >&2\n"
+                + "printf '%s\\n' \"$uid\" > \"$UF.tmp\"\n"
+                + "/system/bin/mv \"$UF.tmp\" \"$UF\" 2>/dev/null || mv \"$UF.tmp\" \"$UF\"\n"
+                + "sync\n"
+                + "/system/bin/sh -c \"printf 'scrcpy-gp:uid=%s\\n' \\\"$uid\\\"\"\n"
+                + "printf 'scrcpy-gp:uid=%s\\n' \"$uid\" >&2\n"
                 + "[ \"$uid\" = \"0\" ] || exit 42\n"
                 + "exec " + plain + "\n";
         pushTextFile(REMOTE_START, body, SCRIPT_MODE);
-        // Always pass -c so Magisk/KernelSU run via shell; avoids `su 0 sh path`
-        // login-argv quirks on some Magisk/KernelSU builds.
-        if (suForm != null && suForm.startsWith("su0")) {
-            return "su 0 -c " + shellSingleQuote("sh " + REMOTE_START);
+        Log.i("server: elevated start script ready path=%s plainLen=%d",
+                REMOTE_START, plain.length());
+    }
+
+    private static final class ElevateRecipe {
+        final String name;
+        final String openCmd;   // Adb shell: destination
+        final String stdinCmd;  // if non-null, write this after open (interactive su)
+        ElevateRecipe(String name, String openCmd, String stdinCmd) {
+            this.name = name;
+            this.openCmd = openCmd;
+            this.stdinCmd = stdinCmd;
         }
-        return "su -c " + shellSingleQuote("sh " + REMOTE_START);
+    }
+
+    private java.util.List<ElevateRecipe> elevateRecipes() {
+        java.util.ArrayList<ElevateRecipe> out = new java.util.ArrayList<>();
+        String shStart = "sh " + REMOTE_START;
+        String q = shellSingleQuote(shStart);
+        String preferred = suForm == null ? "" : suForm;
+        java.util.function.Consumer<ElevateRecipe> add = r -> {
+            for (ElevateRecipe e : out) if (e.name.equals(r.name)) return;
+            out.add(r);
+        };
+        if (preferred.startsWith("su0")) {
+            add.accept(new ElevateRecipe("su0_c", "su 0 -c " + q, null));
+            add.accept(new ElevateRecipe("su_c", "su -c " + q, null));
+        } else {
+            add.accept(new ElevateRecipe("su_c", "su -c " + q, null));
+            add.accept(new ElevateRecipe("su0_c", "su 0 -c " + q, null));
+        }
+        add.accept(new ElevateRecipe("sysbin_su_c",
+                "/system/bin/su -c " + q, null));
+        add.accept(new ElevateRecipe("debug_ramdisk_su_c",
+                "/debug_ramdisk/su -c " + q, null));
+        add.accept(new ElevateRecipe("sbin_su_c",
+                "/sbin/su -c " + q, null));
+        String ns = shellSingleQuote(
+                "nsenter --mount=/proc/1/ns/mnt -- /system/bin/sh " + REMOTE_START);
+        add.accept(new ElevateRecipe("su_c_nsenter", "su -c " + ns, null));
+        add.accept(new ElevateRecipe("su0_c_nsenter", "su 0 -c " + ns, null));
+        add.accept(new ElevateRecipe("su_stdin", "su", shStart + "\n"));
+        add.accept(new ElevateRecipe("su0_stdin", "su 0", shStart + "\n"));
+        return out;
+    }
+
+
+    private Streams tryElevatedRecipes(String scid) throws Exception {
+        java.util.List<ElevateRecipe> recipes = elevateRecipes();
+        StringBuilder transcript = new StringBuilder();
+        Exception last = null;
+        boolean first = true;
+        for (ElevateRecipe r : recipes) {
+            // First recipe may wait for Magisk dialog; later ones fail fast.
+            long uidWait = first ? SU_PROMPT_MS : ELEVATE_UID_QUICK_MS;
+            first = false;
+            Log.i("server: elevate recipe TRY name=%s open=%s stdin=%s uidWait=%d",
+                    r.name, r.openCmd, r.stdinCmd == null ? "-" : "yes", uidWait);
+            transcript.append("TRY ").append(r.name).append(" open=").append(r.openCmd);
+            if (r.stdinCmd != null) transcript.append(" stdin=yes");
+            transcript.append('\n');
+            try {
+                clearRemoteUidFile();
+                Streams streams = spawnAndConnectElevated(r, scid, uidWait);
+                Log.i("server: elevate recipe OK name=%s", r.name);
+                suForm = r.name;
+                lastElevateDetail = "ok recipe=" + r.name;
+                return streams;
+            } catch (Exception e) {
+                String msg = String.valueOf(e.getMessage());
+                Log.w("server: elevate recipe FAIL name=%s err=%s", r.name, msg);
+                transcript.append("FAIL ").append(r.name).append(" ").append(msg).append('\n');
+                last = e;
+                closeShell();
+                serverEof = false;
+            }
+        }
+        String detail = transcript.toString().trim();
+        lastElevateDetail = detail;
+        Log.e("server: elevate all recipes failed:\n%s", detail);
+        if (last != null) throw new IOException("all elevate recipes failed: " + detail, last);
+        throw new IOException("all elevate recipes failed: " + detail);
+    }
+
+    private Streams spawnAndConnectElevated(ElevateRecipe recipe, String scid, long uidWaitMs)
+            throws Exception {
+        AdbStream va = null, aa = null, ca = null;
+        boolean committed = false;
+        try {
+            shell = adb.openShell(recipe.openCmd);
+            AdbStream shellRef = shell;
+            if (recipe.stdinCmd != null) {
+                OutputStream shellOut = shellRef.openOutputStream();
+                byte[] bytes = recipe.stdinCmd.getBytes(StandardCharsets.UTF_8);
+                shellOut.write(bytes);
+                shellOut.flush();
+                Log.d("server: elevate stdin wrote %d bytes recipe=%s",
+                        bytes.length, recipe.name);
+            }
+            InputStream shellIn = shellRef.openInputStream();
+            int uid = awaitElevatedUid(shellIn, recipe.name, uidWaitMs);
+            if (uid != 0) {
+                throw new IOException("elevated spawn not uid 0 (got " + uid
+                        + ") recipe=" + recipe.name);
+            }
+            Log.i("server: elevated start confirmed uid=0 recipe=%s", recipe.name);
+            shellPump = new Thread(() -> pump(shellIn), "server-stdout");
+            shellPump.setDaemon(true);
+            shellPump.start();
+
+            long acceptDeadline = LISTENER_DEADLINE_ELEVATED_MS;
+            va = openAbstract(scid, acceptDeadline);
+            aa = openAbstract(scid, acceptDeadline);
+            ca = openAbstract(scid, acceptDeadline);
+
+            InputStream  vi = va.openInputStream();
+            InputStream  ai = aa.openInputStream();
+            InputStream  ci = ca.openInputStream();
+            OutputStream co = ca.openOutputStream();
+
+            Log.i("device name=%s", readDeviceMeta(vi));
+            streams = new Streams(va, aa, ca, vi, ai, ci, co);
+            committed = true;
+            return streams;
+        } finally {
+            if (!committed) {
+                closeQuietly(va);
+                closeQuietly(aa);
+                closeQuietly(ca);
+                closeShell();
+            }
+        }
     }
 
     private static String shellSingleQuote(String s) {
@@ -256,6 +396,8 @@ public final class Server {
                 {"su_c", "su -c " + shellSingleQuote("id -u")},
                 {"su0", "su 0 -c " + shellSingleQuote("id -u")},
                 {"su0_raw", "su 0 id -u"},
+                {"sysbin_su_c", "/system/bin/su -c " + shellSingleQuote("id -u")},
+                {"debug_ramdisk_su_c", "/debug_ramdisk/su -c " + shellSingleQuote("id -u")},
         };
         String pendingName = null;
         String pendingCmd = null;
@@ -283,12 +425,18 @@ public final class Server {
             pushTextFile(REMOTE_PROBE, "#!/system/bin/sh\nid -u\n", SCRIPT_MODE);
             String scriptName;
             String scriptCmd;
-            if (pendingName.startsWith("su_c")) {
-                scriptName = "su_c_script";
-                scriptCmd = "su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
-            } else {
+            if (pendingName.startsWith("su0")) {
                 scriptName = "su0_script";
                 scriptCmd = "su 0 -c " + shellSingleQuote("sh " + REMOTE_PROBE);
+            } else if (pendingName.startsWith("sysbin")) {
+                scriptName = "sysbin_su_c_script";
+                scriptCmd = "/system/bin/su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
+            } else if (pendingName.startsWith("debug")) {
+                scriptName = "debug_ramdisk_su_c_script";
+                scriptCmd = "/debug_ramdisk/su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
+            } else {
+                scriptName = "su_c_script";
+                scriptCmd = "su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
             }
             SuProbeResult longR = probeSuOnce(scriptName, scriptCmd, SU_PROMPT_MS);
             if (longR == SuProbeResult.PENDING) return SuProbeResult.DENIED;
@@ -307,7 +455,8 @@ public final class Server {
         final StringBuilder out = new StringBuilder();
         final long started = monotonicMs();
         try {
-            Log.i("server: su probe begin form=%s timeout=%d ms", formName, timeoutMs);
+            Log.i("server: su probe begin form=%s timeout=%d ms cmd=%s",
+                    formName, timeoutMs, cmd);
             s = adb.openShell(cmd);
             AdbStream ref = s;
             reader = new Thread(() -> {
@@ -360,7 +509,56 @@ public final class Server {
     }
 
     /** Read start-script banner `scrcpy-gp:uid=N` from the elevated shell stdout. */
-    private int awaitElevatedUid(InputStream in) throws Exception {
+
+    private void clearRemoteUidFile() {
+        AdbStream s = null;
+        try {
+            s = adb.openShell("rm -f " + REMOTE_UID + " " + REMOTE_UID + ".tmp");
+            try (InputStream in = s.openInputStream()) {
+                byte[] buf = new byte[64];
+                long deadline = monotonicMs() + 800;
+                while (monotonicMs() < deadline) {
+                    if (in.read(buf) < 0) break;
+                }
+            }
+            Log.d("server: cleared %s", REMOTE_UID);
+        } catch (Exception e) {
+            Log.d("server: clear uid file: %s", e);
+        } finally {
+            closeQuietly(s);
+        }
+    }
+
+    /** Read uid from REMOTE_UID via a short-lived non-elevated shell. */
+    private int readRemoteUidFile() {
+        AdbStream s = null;
+        try {
+            s = adb.openShell("cat " + REMOTE_UID + " 2>/dev/null");
+            StringBuilder out = new StringBuilder();
+            try (InputStream in = s.openInputStream()) {
+                byte[] buf = new byte[32];
+                long deadline = monotonicMs() + 600;
+                int n;
+                while (monotonicMs() < deadline && (n = in.read(buf)) > 0) {
+                    for (int i = 0; i < n; i++) {
+                        char c = (char) (buf[i] & 0xff);
+                        if (c >= '0' && c <= '9') out.append(c);
+                        else if (out.length() > 0) break;
+                    }
+                    if (out.length() > 0 && n < buf.length) break;
+                }
+            }
+            if (out.length() == 0) return -1;
+            return Integer.parseInt(out.toString());
+        } catch (Exception e) {
+            return -1;
+        } finally {
+            closeQuietly(s);
+        }
+    }
+
+    /** Confirm elevated start via uid file (authoritative) and/or stdout banner. */
+    private int awaitElevatedUid(InputStream in, String recipeName, long maxWaitMs) throws Exception {
         final StringBuilder out = new StringBuilder();
         final Object lock = new Object();
         final boolean[] done = {false};
@@ -375,7 +573,7 @@ public final class Server {
                             if (c >= 0x20 && c <= 0x7e) out.append(c);
                             else if (c == '\n' || c == '\r') out.append(' ');
                         }
-                        if (out.indexOf("scrcpy-gp:uid=") >= 0 || out.length() > 200) {
+                        if (out.indexOf("scrcpy-gp:uid=") >= 0 || out.length() > 400) {
                             done[0] = true;
                             lock.notifyAll();
                             return;
@@ -394,64 +592,79 @@ public final class Server {
         reader.start();
 
         long started = monotonicMs();
-        // Phase 1: already-granted Magisk returns the banner almost immediately.
-        synchronized (lock) {
-            while (!done[0] && monotonicMs() - started < ELEVATE_UID_QUICK_MS) {
-                long wait = ELEVATE_UID_QUICK_MS - (monotonicMs() - started);
-                if (wait <= 0) break;
-                try { lock.wait(wait); }
-                catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+        int fileUid = -1;
+        int bannerUid = -1;
+        boolean extended = false;
+
+        long limit = maxWaitMs > 0 ? maxWaitMs : SU_PROMPT_MS;
+        while (monotonicMs() - started < limit) {
+            // Authoritative: separate-shell cat of REMOTE_UID.
+            fileUid = readRemoteUidFile();
+            if (fileUid == 0) {
+                Log.i("server: elevated uid FILE ok uid=0 recipe=%s elapsed=%d ms",
+                        recipeName, monotonicMs() - started);
+                break;
             }
-        }
-        boolean haveBanner;
-        synchronized (lock) {
-            haveBanner = out.indexOf("scrcpy-gp:uid=") >= 0;
-        }
-        // Phase 2: only if still pending — Magisk dialog on the *start* su.
-        if (!haveBanner && !done[0]) {
-            notifyWaitingForGrant();
-            Log.i("server: waiting for Magisk grant on elevated start (uid banner)");
             synchronized (lock) {
-                while (!done[0] && monotonicMs() - started < SU_PROMPT_MS) {
-                    long wait = SU_PROMPT_MS - (monotonicMs() - started);
-                    if (wait <= 0) break;
-                    try { lock.wait(Math.min(wait, 1000L)); }
-                    catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
+                String text = out.toString();
+                int idx = text.indexOf("scrcpy-gp:uid=");
+                if (idx >= 0) {
+                    int startUid = idx + "scrcpy-gp:uid=".length();
+                    int endUid = startUid;
+                    while (endUid < text.length() && Character.isDigit(text.charAt(endUid)))
+                        endUid++;
+                    if (endUid > startUid) {
+                        try { bannerUid = Integer.parseInt(text.substring(startUid, endUid)); }
+                        catch (NumberFormatException ignored) {}
                     }
                 }
             }
+            if (bannerUid == 0) {
+                Log.i("server: elevated uid BANNER ok uid=0 recipe=%s elapsed=%d ms",
+                        recipeName, monotonicMs() - started);
+                break;
+            }
+            if (fileUid > 0) {
+                Log.w("server: elevated uid FILE non-root uid=%d recipe=%s",
+                        fileUid, recipeName);
+                break;
+            }
+            if (bannerUid > 0) {
+                Log.w("server: elevated uid BANNER non-root uid=%d recipe=%s",
+                        bannerUid, recipeName);
+                break;
+            }
+            long elapsed = monotonicMs() - started;
+            if (!extended && elapsed >= ELEVATE_UID_QUICK_MS && !done[0]) {
+                extended = true;
+                notifyWaitingForGrant();
+                Log.i("server: waiting for Magisk grant on elevated start recipe=%s",
+                        recipeName);
+            }
+            if (done[0] && fileUid < 0 && bannerUid < 0 && elapsed >= ELEVATE_UID_QUICK_MS) {
+                // Stream ended with no uid — recipe failed fast.
+                break;
+            }
+            try { Thread.sleep(ELEVATE_UID_POLL_MS); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
 
-        // Reader must leave before pump() uses the same InputStream.
         if (!done[0]) reader.interrupt();
-        try { reader.join(500); }
+        try { reader.join(400); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
 
         final String textOut;
         synchronized (lock) { textOut = out.toString(); }
-        int idx = textOut.indexOf("scrcpy-gp:uid=");
-        if (idx < 0) {
-            Log.w("server: elevated uid banner missing after %d ms raw=%s",
-                    monotonicMs() - started, textOut.trim());
-            return -1;
-        }
-        int startUid = idx + "scrcpy-gp:uid=".length();
-        int endUid = startUid;
-        while (endUid < textOut.length() && Character.isDigit(textOut.charAt(endUid))) endUid++;
-        if (endUid == startUid) return -1;
-        try {
-            int uid = Integer.parseInt(textOut.substring(startUid, endUid));
-            Log.i("server: elevated uid banner uid=%d elapsed=%d ms",
-                    uid, monotonicMs() - started);
-            return uid;
-        } catch (NumberFormatException e) {
-            return -1;
-        }
+        Log.i("server: elevate uid wait done recipe=%s fileUid=%d bannerUid=%d elapsed=%d ms stdout=%s",
+                recipeName, fileUid, bannerUid, monotonicMs() - started, textOut.trim());
+
+        if (fileUid == 0 || bannerUid == 0) return 0;
+        if (fileUid > 0) return fileUid;
+        if (bannerUid > 0) return bannerUid;
+        return -1;
     }
 
     private static boolean looksLikeUid0(String textOut) {

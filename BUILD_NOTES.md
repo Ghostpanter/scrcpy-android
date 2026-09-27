@@ -62,7 +62,7 @@ the repo under `/workspace/secrets/`).
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
 | versionName | `0.5.9-ghostpanter` |
-| versionCode | `18` |
+| versionCode | `19` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -76,13 +76,20 @@ the repo under `/workspace/secrets/`).
 - The broken unsigned v0.5.9 asset never installed, so most users only
   need a fresh install of the replaced asset.
 
-### Elevate / connect (vc18)
+### Elevate / connect (vc19)
 
 - Quick su probe (~1.5s). If Magisk already granted ADB shell → skip 60s wait.
 - Long Magisk wait only when the quick probe hangs (first grant).
-- Elevated start script prints `scrcpy-gp:uid=0` and aborts unless root; UI toasts 已获 Root / 正在等待 Magisk 授权 / 提权失败仍黑屏.
-- **vc18 fix:** start script flushes `scrcpy-gp:uid=` via a child `sh -c echo` (+ stderr)
-  before `exec app_process`. ADB `shell:cmd` is non-TTY (fully buffered); echo+exec
-  previously discarded the uid=0 banner so probe-OK devices still FALLBACK'd.
-- Start wrapper uses `su -c` / `su 0 -c` (not bare `su 0 sh path`) for Magisk + KernelSU.
+- Elevated start script writes uid to `/data/local/tmp/scrcpy-gp-uid` and prints
+  `scrcpy-gp:uid=`; aborts unless root. UI toasts 已获 Root / 正在等待 Magisk 授权 /
+  提权失败仍黑屏, with dialog → 设置→日志.
+- **vc19 fix (root cause):** Magisk `su -c` + ADB `shell:cmd` often fully-buffers
+  stdout until process exit; `exec app_process` never exits, so a banner-only
+  `awaitElevatedUid` falsely FALLBACKs even when Magisk Superuser shows Shell ALLOWED.
+  Now the start script writes uid to a file and the client polls it via a **separate**
+  non-elevated shell. Multiple start recipes (`su -c`, `su 0 -c`, `/system/bin/su`,
+  `/debug_ramdisk/su`, `nsenter`, interactive `su` stdin) — every probe/start
+  transcript goes into the in-app Log ring buffer (Settings → 日志).
+- **In-app log viewer:** Settings → 日志 — Verbose/Debug/Info/Warn/Error, scroll,
+  copy/share/clear.
 

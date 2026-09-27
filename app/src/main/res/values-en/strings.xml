@@ -50,8 +50,30 @@
     <string name="elevate_root_ok">Root granted — server started as uid 0; FLAG_SECURE content should be visible.</string>
     <string name="elevate_su_denied">Elevate failed: Magisk denied or timed out. Secure apps stay black. Allow shell/ADB on the target, then Reconnect.</string>
     <string name="elevate_su_unavailable">No working su (no Root/Magisk). Secure apps stay black; use Unlock for blind PIN, or install Magisk and enable Root elevate.</string>
-    <string name="elevate_fallback">Elevate failed (still black): could not start server as uid 0; fell back to shell. Check Magisk grant on the target, then reconnect.</string>
-    <string name="elevate_waiting">Waiting for Magisk grant…</string>
+    <string name="elevate_fallback">Elevate failed (still black): could not start server as uid 0; fell back to shell. Open Settings → Logs for the full probe/start transcript; confirm Magisk allowed Shell, then reconnect.</string>
+    
+    <string name="log_viewer_title">Logs</string>
+    <string name="log_viewer_caption">Full elevate / ADB / su / server output (toasts truncate). Filter by level, copy or share.</string>
+    <string name="log_level">Log level</string>
+    <string name="log_level_verbose">Verbose</string>
+    <string name="log_level_debug">Debug</string>
+    <string name="log_level_info">Info</string>
+    <string name="log_level_warn">Warn</string>
+    <string name="log_level_error">Error</string>
+    <string name="log_refresh">Refresh</string>
+    <string name="log_copy">Copy</string>
+    <string name="log_share">Share</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_copied">Copied to clipboard</string>
+    <string name="log_copy_failed">Copy failed</string>
+    <string name="log_cleared">Logs cleared</string>
+    <string name="log_empty">(no log lines yet)</string>
+    <string name="log_count_format">%1$d buffered · showing ≥ %2$s</string>
+    <string name="view_logs">View logs</string>
+    <string name="elevate_fallback_view_logs">View full error</string>
+    <string name="elevate_open_logs_hint">See Settings → Logs for details</string>
+
+<string name="elevate_waiting">Waiting for Magisk grant…</string>
     <string name="connecting">connecting…</string>
     <string name="disconnected">disconnected</string>
     <string name="session_error">Session error: %1$s</string>

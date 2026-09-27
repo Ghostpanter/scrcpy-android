@@ -50,8 +50,30 @@
     <string name="elevate_root_ok">已获 Root，server 以 uid 0 启动；安全层（FLAG_SECURE）画面应可显示。</string>
     <string name="elevate_su_denied">提权失败：Magisk 未授权或超时。安全层仍为黑屏。请在被控端允许 shell/ADB 后点重新连接。</string>
     <string name="elevate_su_unavailable">未检测到可用 su（无 Root/Magisk）。安全层仍为黑屏；可用「解锁」盲输 PIN，或安装 Magisk 并开启 Root 提权。</string>
-    <string name="elevate_fallback">提权失败仍黑屏：未能以 uid 0 启动 server，已回退普通 shell。请检查被控端 Magisk 授权后重连。</string>
-    <string name="elevate_waiting">正在等待 Magisk 授权…</string>
+    <string name="elevate_fallback">提权失败仍黑屏：未能以 uid 0 启动 server，已回退普通 shell。请打开「设置→日志」查看完整 probe/start 报错；确认 Magisk 已允许 Shell 后点重新连接。</string>
+    
+    <string name="log_viewer_title">日志</string>
+    <string name="log_viewer_caption">查看提权 / ADB / su / server 完整输出（解决 toast 截断）。可筛选等级、复制或分享。</string>
+    <string name="log_level">日志等级</string>
+    <string name="log_level_verbose">Verbose</string>
+    <string name="log_level_debug">Debug</string>
+    <string name="log_level_info">Info</string>
+    <string name="log_level_warn">Warn</string>
+    <string name="log_level_error">Error</string>
+    <string name="log_refresh">刷新</string>
+    <string name="log_copy">复制</string>
+    <string name="log_share">分享</string>
+    <string name="log_clear">清空</string>
+    <string name="log_copied">已复制到剪贴板</string>
+    <string name="log_copy_failed">复制失败</string>
+    <string name="log_cleared">日志已清空</string>
+    <string name="log_empty">（暂无日志）</string>
+    <string name="log_count_format">缓冲 %1$d 条 · 显示 ≥ %2$s</string>
+    <string name="view_logs">查看日志</string>
+    <string name="elevate_fallback_view_logs">查看完整报错</string>
+    <string name="elevate_open_logs_hint">详情见 设置 → 日志</string>
+
+<string name="elevate_waiting">正在等待 Magisk 授权…</string>
     <string name="connecting">正在连接…</string>
     <string name="disconnected">已断开</string>
     <string name="session_error">会话错误：%1$s</string>

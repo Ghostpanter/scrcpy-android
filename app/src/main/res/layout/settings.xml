@@ -455,6 +455,14 @@
         </LinearLayout>
 
         <Button
+            android:id="@+id/view_logs"
+            style="@style/Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/space_lg"
+            android:text="@string/view_logs"/>
+
+        <Button
             android:id="@+id/donate"
             style="@style/Button.Secondary"
             android:layout_width="match_parent"

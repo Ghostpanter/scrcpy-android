@@ -89,6 +89,9 @@ public final class SettingsActivity extends Activity {
             Log.i("settings: max_fps=%d", v);
         });
 
+        findViewById(R.id.view_logs).setOnClickListener(v ->
+                startActivity(new android.content.Intent(this, LogViewerActivity.class)));
+
         findViewById(R.id.donate).setOnClickListener(v ->
                 startActivity(new android.content.Intent(this, Donate.class)));
 

@@ -72,6 +72,12 @@
             android:theme="@style/Theme.Scrcpy.NoActionBar"/>
 
         <activity
+            android:name=".LogViewerActivity"
+            android:exported="false"
+            android:label="@string/log_viewer_title"
+            android:theme="@style/Theme.Scrcpy.NoActionBar"/>
+
+        <activity
             android:name=".Licenses"
             android:exported="false"
             android:label="@string/licenses"
