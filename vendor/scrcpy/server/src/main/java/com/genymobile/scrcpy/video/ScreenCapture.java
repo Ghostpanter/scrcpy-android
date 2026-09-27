@@ -1,6 +1,8 @@
 package com.genymobile.scrcpy.video;
 
 import com.genymobile.scrcpy.AndroidVersions;
+import com.genymobile.scrcpy.FakeContext;
+import com.genymobile.scrcpy.Workarounds;
 import com.genymobile.scrcpy.Options;
 import com.genymobile.scrcpy.control.PositionMapper;
 import com.genymobile.scrcpy.device.Device;
@@ -178,10 +180,39 @@ public class ScreenCapture extends SurfaceCapture {
                         if (firstFailure != null) {
                             Ln.e("Earlier secure attempt also failed", firstFailure);
                         }
-                        throw new AssertionError("Could not create display");
+                        // Do not AssertionError here — setuid(2000) safety net below.
                     }
                 }
             }
+        }
+
+        // Safety net (HyperOS / Android 16): if still no display while retaining
+        // ruid=0, permanently drop to shell like stock scrcpy and retry once.
+        // Guarantees vc20-like connectivity when FakeContext/package fixes are
+        // incomplete on some OEMs. Secure capture is abandoned after this.
+        if (virtualDisplay == null && display == null && isRealUidRoot()) {
+            Ln.i("Display: falling back to setuid(2000) after root display create failed");
+            try {
+                Os.setuid(2000);
+                Workarounds.updateFakePackageName(FakeContext.PACKAGE_NAME);
+            } catch (ErrnoException e) {
+                throw new IOException("setuid(2000) failed after display create failure", e);
+            }
+            try {
+                virtualDisplay = ServiceManager.getDisplayManager()
+                        .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
+                Ln.i("Display: using DisplayManager API after setuid(2000)");
+            } catch (Exception afterSetuidException) {
+                Ln.e("Could not create display after setuid(2000)", afterSetuidException);
+                if (firstFailure != null) {
+                    Ln.e("Earlier secure attempt also failed", firstFailure);
+                }
+                throw new IOException("Could not create display", afterSetuidException);
+            }
+        }
+
+        if (virtualDisplay == null && display == null) {
+            throw new IOException("Could not create display");
         }
 
         if (vdListener != null) {
@@ -236,8 +267,8 @@ public class ScreenCapture extends SurfaceCapture {
 
     private void openSecureDisplay(Surface surface, Size inputSize) throws Exception {
         // Prefer DisplayManager + VIRTUAL_DISPLAY_FLAG_SECURE (required on A14+;
-        // SurfaceControl.createDisplay is deprecated there). Fall back to
-        // SurfaceControl secure display on older APIs.
+        // SurfaceControl.createDisplay is deprecated/removed on A16). Fall back to
+        // SurfaceControl secure display only when the method still exists.
         try {
             virtualDisplay = ServiceManager.getDisplayManager().createSecureMirrorVirtualDisplay(
                     "scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
@@ -245,6 +276,10 @@ public class ScreenCapture extends SurfaceCapture {
             return;
         } catch (Exception displayManagerException) {
             Ln.d("DisplayManager SECURE failed: " + displayManagerException.getMessage());
+            if (!SurfaceControl.hasCreateDisplayMethod()) {
+                // Do not mask the DM failure behind a missing SC method on A16.
+                throw displayManagerException;
+            }
             display = createDisplay(/* secure */ true);
             Size deviceSize = displayInfo.getSize();
             int layerStack = displayInfo.getLayerStack();

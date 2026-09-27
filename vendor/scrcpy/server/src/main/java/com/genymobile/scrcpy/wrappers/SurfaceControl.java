@@ -78,8 +78,41 @@ public final class SurfaceControl {
         }
     }
 
+    /**
+     * Create a display via SurfaceControl. On Android 16 the classic
+     * {@code createDisplay(String, boolean)} was removed; try known signatures
+     * and throw a clear Exception (not AssertionError) so callers can fall through.
+     */
     public static IBinder createDisplay(String name, boolean secure) throws Exception {
-        return (IBinder) CLASS.getMethod("createDisplay", String.class, boolean.class).invoke(null, name, secure);
+        try {
+            Method method = CLASS.getMethod("createDisplay", String.class, boolean.class);
+            return (IBinder) method.invoke(null, name, secure);
+        } catch (NoSuchMethodException e) {
+            try {
+                // Some builds briefly exposed a single-arg overload.
+                Method method = CLASS.getMethod("createDisplay", String.class);
+                Ln.w("SurfaceControl.createDisplay(String,boolean) missing; using createDisplay(String)");
+                return (IBinder) method.invoke(null, name);
+            } catch (NoSuchMethodException e2) {
+                throw new Exception(
+                        "SurfaceControl.createDisplay unavailable on this Android version "
+                                + "(removed on Android 16+)", e2);
+            }
+        }
+    }
+
+    public static boolean hasCreateDisplayMethod() {
+        try {
+            CLASS.getMethod("createDisplay", String.class, boolean.class);
+            return true;
+        } catch (NoSuchMethodException e) {
+            try {
+                CLASS.getMethod("createDisplay", String.class);
+                return true;
+            } catch (NoSuchMethodException e2) {
+                return false;
+            }
+        }
     }
 
     private static Method getGetBuiltInDisplayMethod() throws NoSuchMethodException {

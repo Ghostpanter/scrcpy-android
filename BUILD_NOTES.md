@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.10-ghostpanter` |
-| versionCode | `21` |
+| versionName | `0.5.11-ghostpanter` |
+| versionCode | `22` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -104,6 +104,34 @@ required — not bundled. Blind unlock keypad remains as non-root fallback.
 **Build patched server jar:** `./scripts/install-patched-server` (not
 `update-server`, which fetches stock upstream). Asset stays gitignored; rebuild
 before `assembleRelease`.
+
+
+### Connect / A16 HyperOS (vc22 / 0.5.11)
+
+**Root cause (MI 9 HyperOS Android 16):** v0.5.10 kept `ruid=0` via `seteuid(2000)`
+for secure capture, but DisplayManager checks that FakeContext package
+`com.android.shell` matches calling uid — uid 0 mismatches. Meanwhile
+`SurfaceControl.createDisplay(String,boolean)` was removed on A16. Both secure
+and fallback paths failed → `AssertionError: Could not create display` →
+reconnect loop. vc20 (full `setuid(2000)`) could still create a display.
+
+**Fix:**
+1. `FakeContext` / `Workarounds`: when `getuid()==0`, report package `"android"`
+   and AttributionSource ROOT_UID so DisplayManager package checks pass under
+   retained root; keep `com.android.shell` when uid is 2000.
+2. `SurfaceControl.createDisplay`: try known signatures; clear Exception if gone
+   so callers fall through (never assume SC works on A16).
+3. `openSecureDisplay`: if DM SECURE fails and SC has no createDisplay, rethrow
+   the DM exception (do not mask with missing SC method).
+4. `ScreenCapture.start` safety net: if still no display under ruid=0, log
+   `Display: falling back to setuid(2000) after root display create failed`,
+   permanently `setuid(2000)`, sync Workarounds package to shell, retry stock
+   `createVirtualDisplay` once (vc20-like connectivity).
+5. Failures throw `IOException`, not `AssertionError`, so the session is not
+   killed solely because the secure path failed.
+
+**Honesty:** Normal mirroring must work without LSPosed. Some HyperOS A16 builds
+may still need Magisk+LSPosed+Disable FLAG_SECURE for lock/secure apps only.
 
 ### Elevate / connect (vc20)
 

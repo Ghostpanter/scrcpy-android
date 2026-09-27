@@ -11,18 +11,41 @@ import android.content.ContextWrapper;
 import android.content.IContentProvider;
 import android.os.Binder;
 import android.os.Process;
+import android.system.Os;
 
 import java.lang.reflect.Field;
 
 public final class FakeContext extends ContextWrapper {
 
     public static final String PACKAGE_NAME = "com.android.shell";
+    public static final String ROOT_PACKAGE_NAME = "android";
     public static final int ROOT_UID = 0; // Like android.os.Process.ROOT_UID, but before API 29
 
     private static final FakeContext INSTANCE = new FakeContext();
 
     public static FakeContext get() {
         return INSTANCE;
+    }
+
+    /**
+     * DisplayManager on Android 16+ checks that the calling package matches the
+     * owner of the calling uid. With ruid retained as 0 (seteuid-only drop),
+     * {@code com.android.shell} mismatches uid 0; use {@code android}/ROOT_UID.
+     * When running as shell (uid 2000), keep the stock shell identity.
+     */
+    public static boolean isRootUid() {
+        try {
+            if (Os.getuid() == 0) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // fall through to Process.myUid()
+        }
+        return Process.myUid() == 0;
+    }
+
+    public static String currentPackageName() {
+        return isRootUid() ? ROOT_PACKAGE_NAME : PACKAGE_NAME;
     }
 
     private final ContentResolver contentResolver = new ContentResolver(this) {
@@ -63,19 +86,20 @@ public final class FakeContext extends ContextWrapper {
 
     @Override
     public String getPackageName() {
-        return PACKAGE_NAME;
+        return currentPackageName();
     }
 
     @Override
     public String getOpPackageName() {
-        return PACKAGE_NAME;
+        return currentPackageName();
     }
 
     @TargetApi(AndroidVersions.API_31_ANDROID_12)
     @Override
     public AttributionSource getAttributionSource() {
-        AttributionSource.Builder builder = new AttributionSource.Builder(Process.SHELL_UID);
-        builder.setPackageName(PACKAGE_NAME);
+        boolean root = isRootUid();
+        AttributionSource.Builder builder = new AttributionSource.Builder(root ? ROOT_UID : Process.SHELL_UID);
+        builder.setPackageName(root ? ROOT_PACKAGE_NAME : PACKAGE_NAME);
         return builder.build();
     }
 

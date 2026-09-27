@@ -47,7 +47,7 @@
     <string name="bit_rate_16m">16 Mbps</string>
     <string name="reconnect">Reconnect</string>
     <string name="disconnect">Disconnect</string>
-    <string name="elevate_root_ok">Root granted — server started as ruid=0 with secure capture; lock/secure pages should be visible (some OEM A14+ may still need LSPosed).</string>
+    <string name="elevate_root_ok">Root granted — server started as ruid=0 with secure capture; lock/secure pages should be visible (some HyperOS/OEM A14–16 may still need LSPosed for lock/secure apps; normal mirroring works without it).</string>
     <string name="elevate_su_denied">Elevate failed: Magisk denied or timed out. Secure apps stay black. Allow shell/ADB on the target, then Reconnect.</string>
     <string name="elevate_su_unavailable">No working su (no Root/Magisk). Secure apps stay black; use Unlock for blind PIN, or install Magisk and enable Root elevate.</string>
     <string name="elevate_fallback">Elevate failed (still black): could not start server as uid 0; fell back to shell. Open Settings → Logs for the full probe/start transcript; confirm Magisk allowed Shell, then reconnect.</string>
@@ -177,13 +177,13 @@
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">Secure content / Root / Shizuku</string>
     <string name="secure_content_nonroot">Non-root: use Unlock on the mirror for blind PIN/password; unlock patterns on the phone first. On Android 12+ lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
-    <string name="secure_content_root">Root (preferred): with “Elevate server for secure layers (su)” on, if the target has working su we start the patched server as ruid=0 requesting secure-layer capture; lock screen and encrypted gallery usually mirror. Falls back to normal shell on failure. Some Android 14/16 OEMs still black out even as root — then use Magisk+LSPosed+Disable FLAG_SECURE (not bundled).</string>
+    <string name="secure_content_root">Root (preferred): with “Elevate server for secure layers (su)” on, if the target has working su we start the patched server as ruid=0 requesting secure-layer capture; lock screen and encrypted gallery usually mirror. Falls back to normal shell on failure. Normal mirroring works without LSPosed. Some HyperOS/Android 14–16 OEMs may still black out lock/secure apps even as root — then use Magisk+LSPosed+Disable FLAG_SECURE (not bundled).</string>
 
     <string name="secure_content_shizuku">Shizuku (local shell): authorize Shizuku on this controller for local shell helpers. Shizuku is only shell uid — it does not replace Root on the target. Android 12+ FLAG_SECURE lock/gallery on the target still need Root elevate there. Wireless ADB always remains available.</string>
 
     <string name="root_capture_secure">Elevate server for secure layers (su)</string>
 
-    <string name="root_capture_secure_help">On by default. On connect we request su on the target (Magisk may prompt, or auto-grant ADB shell). Success starts the patched scrcpy-server with ruid=0 and a secure virtual display for FLAG_SECURE. Failure shows a clear message and falls back to shell. If some Android 14/16 OEMs stay black even with root, install Magisk+LSPosed+Disable FLAG_SECURE (not bundled).</string>
+    <string name="root_capture_secure_help">On by default. On connect we request su on the target (Magisk may prompt, or auto-grant ADB shell). Success starts the patched scrcpy-server with ruid=0 and a secure virtual display for FLAG_SECURE. Failure shows a clear message and falls back to shell. Normal mirroring works without LSPosed. If some HyperOS/Android 14–16 OEMs stay black on lock/secure apps even with root, install Magisk+LSPosed+Disable FLAG_SECURE (not bundled).</string>
 
     <string name="prefer_shizuku">Enable Shizuku (this device)</string>
 

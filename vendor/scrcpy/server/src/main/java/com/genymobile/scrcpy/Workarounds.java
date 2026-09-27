@@ -84,7 +84,8 @@ public final class Workarounds {
             Object appBindData = appBindDataConstructor.newInstance();
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
-            applicationInfo.packageName = FakeContext.PACKAGE_NAME;
+            // Match calling uid: "android" when ruid=0, else com.android.shell
+            applicationInfo.packageName = FakeContext.currentPackageName();
 
             // appBindData.appInfo = applicationInfo;
             Field appInfoField = appBindDataClass.getDeclaredField("appInfo");
@@ -98,6 +99,30 @@ public final class Workarounds {
         } catch (Throwable throwable) {
             // this is a workaround, so failing is not an error
             Ln.d("Could not fill app info: " + throwable.getMessage());
+        }
+    }
+
+    /**
+     * Keep ActivityThread AppBindData.appInfo.packageName in sync after a
+     * permanent setuid drop (or other identity change) so DisplayManager's
+     * packageName-vs-uid check still passes.
+     */
+    public static void updateFakePackageName(String packageName) {
+        try {
+            Field mBoundApplicationField = ACTIVITY_THREAD_CLASS.getDeclaredField("mBoundApplication");
+            mBoundApplicationField.setAccessible(true);
+            Object appBindData = mBoundApplicationField.get(ACTIVITY_THREAD);
+            if (appBindData == null) {
+                return;
+            }
+            Field appInfoField = appBindData.getClass().getDeclaredField("appInfo");
+            appInfoField.setAccessible(true);
+            ApplicationInfo applicationInfo = (ApplicationInfo) appInfoField.get(appBindData);
+            if (applicationInfo != null) {
+                applicationInfo.packageName = packageName;
+            }
+        } catch (Throwable throwable) {
+            Ln.d("Could not update fake package name: " + throwable.getMessage());
         }
     }
 
