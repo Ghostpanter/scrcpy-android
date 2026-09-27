@@ -214,22 +214,30 @@ public final class Server {
         }
     }
 
-    // Magisk / KernelSU: `su 0` runs as uid 0; `su -c` is the portable form.
-    // Prefer running a pushed script so Magisk sees a short request and we
-    // avoid shell-quoting hazards on the long CLASSPATH/app_process line.
-    // The script echoes scrcpy-gp:uid=N and aborts unless N==0 so we never
-    // claim ROOT after merely probing, then falling back to a shell start.
+    // Magisk / KernelSU: prefer `su -c` (portable); Magisk also accepts `su 0 -c`.
+    // Push a short start script so Magisk's Superuser UI sees a stable path and
+    // we avoid quoting hazards on the long CLASSPATH/app_process line.
+    //
+    // Critical: ADB `shell:cmd` has no TTY, so the script's stdout is fully
+    // buffered. A plain `echo` + `exec app_process` discards the buffered
+    // banner — awaitElevatedUid never sees scrcpy-gp:uid=0 even when probe
+    // already got uid 0, and we falsely FALLBACK despite Magisk granting
+    // shell. Flush via a child that exits (and mirror to stderr, unbuffered
+    // on bionic) before exec. Keep this AdbStream open for the server life.
     private String elevateCmd(String plain) throws Exception {
         String body = "#!/system/bin/sh\n"
                 + "uid=$(/system/bin/id -u 2>/dev/null || id -u)\n"
-                + "echo scrcpy-gp:uid=$uid\n"
+                + "/system/bin/sh -c \"echo scrcpy-gp:uid=$uid\"\n"
+                + "echo scrcpy-gp:uid=$uid >&2\n"
                 + "[ \"$uid\" = \"0\" ] || exit 42\n"
                 + "exec " + plain + "\n";
         pushTextFile(REMOTE_START, body, SCRIPT_MODE);
-        if (suForm != null && suForm.startsWith("su_c")) {
-            return "su -c " + shellSingleQuote("sh " + REMOTE_START);
+        // Always pass -c so Magisk/KernelSU run via shell; avoids `su 0 sh path`
+        // login-argv quirks on some Magisk/KernelSU builds.
+        if (suForm != null && suForm.startsWith("su0")) {
+            return "su 0 -c " + shellSingleQuote("sh " + REMOTE_START);
         }
-        return "su 0 sh " + REMOTE_START;
+        return "su -c " + shellSingleQuote("sh " + REMOTE_START);
     }
 
     private static String shellSingleQuote(String s) {
@@ -243,9 +251,11 @@ public final class Server {
         // Fast path: inline `id -u` with a short timeout. When Magisk has
         // already allowed ADB shell, this returns uid 0 in well under SU_QUICK_MS
         // and we skip the 60s Magisk-dialog wait entirely.
+        // Prefer portable su -c (KernelSU / Magisk); then Magisk-style su 0 -c.
         String[][] quickForms = {
-                {"su0", "su 0 id -u"},
                 {"su_c", "su -c " + shellSingleQuote("id -u")},
+                {"su0", "su 0 -c " + shellSingleQuote("id -u")},
+                {"su0_raw", "su 0 id -u"},
         };
         String pendingName = null;
         String pendingCmd = null;
@@ -278,7 +288,7 @@ public final class Server {
                 scriptCmd = "su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
             } else {
                 scriptName = "su0_script";
-                scriptCmd = "su 0 sh " + REMOTE_PROBE;
+                scriptCmd = "su 0 -c " + shellSingleQuote("sh " + REMOTE_PROBE);
             }
             SuProbeResult longR = probeSuOnce(scriptName, scriptCmd, SU_PROMPT_MS);
             if (longR == SuProbeResult.PENDING) return SuProbeResult.DENIED;

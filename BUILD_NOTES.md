@@ -62,7 +62,7 @@ the repo under `/workspace/secrets/`).
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
 | versionName | `0.5.9-ghostpanter` |
-| versionCode | `17` |
+| versionCode | `18` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -76,9 +76,13 @@ the repo under `/workspace/secrets/`).
 - The broken unsigned v0.5.9 asset never installed, so most users only
   need a fresh install of the replaced asset.
 
-### Elevate / connect (vc17)
+### Elevate / connect (vc18)
 
 - Quick su probe (~1.5s). If Magisk already granted ADB shell → skip 60s wait.
 - Long Magisk wait only when the quick probe hangs (first grant).
 - Elevated start script prints `scrcpy-gp:uid=0` and aborts unless root; UI toasts 已获 Root / 正在等待 Magisk 授权 / 提权失败仍黑屏.
+- **vc18 fix:** start script flushes `scrcpy-gp:uid=` via a child `sh -c echo` (+ stderr)
+  before `exec app_process`. ADB `shell:cmd` is non-TTY (fully buffered); echo+exec
+  previously discarded the uid=0 banner so probe-OK devices still FALLBACK'd.
+- Start wrapper uses `su -c` / `su 0 -c` (not bare `su 0 sh path`) for Magisk + KernelSU.
 
