@@ -49,6 +49,16 @@
             android:paddingVertical="@dimen/space_xs"
             android:text="@string/reconnect"
             android:visibility="gone"/>
+        <Button
+            android:id="@+id/disconnect"
+            style="@style/Button.Secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_sm"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_md"
+            android:paddingVertical="@dimen/space_xs"
+            android:text="@string/disconnect"/>
 
     </LinearLayout>
 

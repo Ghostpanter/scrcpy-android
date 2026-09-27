@@ -46,6 +46,12 @@
     <string name="bit_rate_8m">8 Mbps</string>
     <string name="bit_rate_16m">16 Mbps</string>
     <string name="reconnect">Reconnect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="elevate_root_ok">Server started as root. If Magisk showed no dialog, ADB shell may already be auto-granted; FLAG_SECURE apps should be visible.</string>
+    <string name="elevate_su_denied">Target su denied or timed out. Allow the Magisk prompt on the target (or set Superuser → shell/ADB to Allow), then Reconnect. Secure apps stay black for now.</string>
+    <string name="elevate_su_unavailable">No working su on the target (no Root / Magisk). FLAG_SECURE apps stay black; use Unlock for blind PIN, or install Magisk and enable Root elevate.</string>
+    <string name="elevate_fallback">Root elevate failed; fell back to shell. Secure apps may stay black — check Magisk grant on the target, then reconnect.</string>
+    <string name="elevate_waiting">Requesting Root on target (check Magisk/su grant dialog there)…</string>
     <string name="connecting">connecting…</string>
     <string name="disconnected">disconnected</string>
     <string name="session_error">Session error: %1$s</string>
@@ -155,7 +161,7 @@
 
     <string name="root_capture_secure">Elevate server for secure layers (su)</string>
 
-    <string name="root_capture_secure_help">On by default. Probes su on the target and starts the server as root when available; auto-falls back otherwise. Does not modify scrcpy-server.jar.</string>
+    <string name="root_capture_secure_help">On by default. On connect we request su on the target (Magisk may prompt, or auto-grant ADB shell). Success starts the server as uid 0 for FLAG_SECURE; failure shows a clear message and falls back to shell. Does not modify scrcpy-server.jar.</string>
 
     <string name="prefer_shizuku">Enable Shizuku (this device)</string>
 

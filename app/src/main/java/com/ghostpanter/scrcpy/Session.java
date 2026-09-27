@@ -43,6 +43,9 @@ public final class Session {
         // Followed by onConnected (recovered), onError (gave up), or
         // onStopped alone (user stop() raced the reconnect).
         default void onReconnecting() {}
+        // After server bring-up: whether Root elevate succeeded. Used to
+        // toast Magisk grant / FLAG_SECURE fallback clearly in Chinese.
+        default void onElevateStatus(Server.ElevateStatus status) {}
         // Fatal: a retry budget ran out, or the failure was not
         // retriable. Always followed by onStopped().
         void onError(Throwable t);
@@ -413,6 +416,7 @@ public final class Session {
         try {
             srv = new Server(ctx, adb);
             Server.Streams s = srv.bringUp();
+            if (listener != null) listener.onElevateStatus(srv.elevateStatus());
 
             // Bind the end callbacks to THIS generation's latch, not to
             // the mutable field. Teardown joins the readers with a 1 s

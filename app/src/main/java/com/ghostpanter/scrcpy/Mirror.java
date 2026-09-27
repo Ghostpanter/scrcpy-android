@@ -76,6 +76,7 @@ public final class Mirror extends Activity {
     private View     statusBar;
     private TextView statusText;
     private Button   reconnectBtn;
+    private Button   disconnectBtn;
 
     // Blind unlock assist (Android 12+ FLAG_SECURE black screen).
     private Button unlockFab;
@@ -150,11 +151,15 @@ public final class Mirror extends Activity {
         });
         root.requestApplyInsets();
 
-        statusBar    = findViewById(R.id.status_bar);
-        statusText   = findViewById(R.id.status_text);
-        reconnectBtn = findViewById(R.id.reconnect);
+        statusBar     = findViewById(R.id.status_bar);
+        statusText    = findViewById(R.id.status_text);
+        reconnectBtn  = findViewById(R.id.reconnect);
+        disconnectBtn = findViewById(R.id.disconnect);
         insetStatusBar();
         reconnectBtn.setOnClickListener(view -> reconnect());
+        if (disconnectBtn != null) {
+            disconnectBtn.setOnClickListener(view -> disconnectAndLeave());
+        }
         setupUnlockAssist();
         updateStatusBar();
 
@@ -291,6 +296,9 @@ public final class Mirror extends Activity {
         state = State.CONNECTING;
         updateStatusBar();
         long generation = ++sessionGeneration;
+        if (Settings.rootCaptureSecure(this) && statusText != null) {
+            statusText.setText(getString(R.string.elevate_waiting));
+        }
         session = new Session(this, adb, target, s, new Session.Listener() {
             @Override public void onConnected(long geometryVersion, int w, int h) {
                 runOnUiThread(() -> {
@@ -312,6 +320,12 @@ public final class Mirror extends Activity {
                     updateStatusBar();
                 });
             }
+            @Override public void onElevateStatus(Server.ElevateStatus status) {
+                runOnUiThread(() -> {
+                    if (destroyed || generation != sessionGeneration) return;
+                    showElevateStatus(status);
+                });
+            }
             @Override public void onError(Throwable t) {
                 runOnUiThread(() -> {
                     if (destroyed || generation != sessionGeneration) return;
@@ -328,6 +342,39 @@ public final class Mirror extends Activity {
             }
         });
         session.start();
+    }
+
+    private void disconnectAndLeave() {
+        Log.i("mirror: disconnect tapped — stop session and return to device list");
+        // finish() → onDestroy stops the Session and Sessions service.
+        finish();
+    }
+
+    private void showElevateStatus(Server.ElevateStatus status) {
+        if (status == null || status == Server.ElevateStatus.DISABLED) return;
+        int res;
+        switch (status) {
+            case ROOT:
+                res = R.string.elevate_root_ok;
+                break;
+            case DENIED:
+                res = R.string.elevate_su_denied;
+                break;
+            case UNAVAILABLE:
+                res = R.string.elevate_su_unavailable;
+                break;
+            case FALLBACK:
+                res = R.string.elevate_fallback;
+                break;
+            default:
+                return;
+        }
+        Toast.makeText(this, res, Toast.LENGTH_LONG).show();
+        // Also surface waiting/denied on the status pill while connecting.
+        if (statusText != null && state == State.CONNECTING
+                && status != Server.ElevateStatus.ROOT) {
+            statusText.setText(getString(res));
+        }
     }
 
     private void reconnect() {
@@ -409,11 +456,13 @@ public final class Mirror extends Activity {
         }
         statusText.setText(s);
         reconnectBtn.setVisibility(state == State.DISCONNECTED ? View.VISIBLE : View.GONE);
+        // Disconnect stays available while mirroring / connecting / after drop.
+        if (disconnectBtn != null) disconnectBtn.setVisibility(View.VISIBLE);
 
-        // Status is only needed during bring-up and after a terminal error.
-        // Target navigation remains inside the mirrored frame.
+        // Keep the status pill visible (including while CONNECTED) so
+        // 「断开连接」 is always easy to tap — not only buried behind Back×2.
         if (statusBar != null) {
-            statusBar.setVisibility(state == State.CONNECTED ? View.GONE : View.VISIBLE);
+            statusBar.setVisibility(View.VISIBLE);
         }
         if (unlockFab != null) {
             unlockFab.setVisibility(state == State.CONNECTED && !unlockPanelOpen

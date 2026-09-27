@@ -63,8 +63,31 @@ public final class Server {
         this.adb = adb;
     }
 
+    public enum ElevateStatus {
+        /** Settings toggle off — shell spawn only. */
+        DISABLED,
+        /** scrcpy-server launched as uid 0. */
+        ROOT,
+        /** No working su on the target (or binary missing). */
+        UNAVAILABLE,
+        /** Magisk/KernelSU prompt timed out or denied. */
+        DENIED,
+        /** su worked in probe but elevated spawn failed; fell back to shell. */
+        FALLBACK
+    }
+
+    private volatile ElevateStatus elevateStatus = ElevateStatus.DISABLED;
+    /** Which elevate wrapper succeeded in probe: "su0" or "su_c". */
+    private String suForm;
+
+    public ElevateStatus elevateStatus() {
+        return elevateStatus;
+    }
+
     public Streams bringUp() throws Exception {
         serverEof = false;
+        elevateStatus = ElevateStatus.DISABLED;
+        suForm = null;
         String version = readVersion();
         long pushed = push();
         Log.i("push %s bytes=%d", REMOTE_PATH, pushed);
@@ -74,24 +97,38 @@ public final class Server {
         // scrcpy-server.jar is unchanged; we only wrap the launch as uid 0
         // (scrcpy-root style) so createDisplay(secure) can succeed on
         // Android 12+. Any elevate failure falls back to a normal shell start.
+        //
+        // Magisk note: the first su request from ADB shell often shows a
+        // Superuser dialog (or auto-grants + toast if Magisk already allowed
+        // "shell"/ADB). The old 2.5s probe closed the AdbStream before the
+        // user could tap Allow, cancelling the request so no lasting dialog
+        // appeared and we silently fell back to shell — FLAG_SECURE stayed
+        // black. Wait long enough for an interactive grant.
         boolean wantElevate = Settings.rootCaptureSecure(ctx);
-        boolean suAvailable = wantElevate && probeSu();
-        if (wantElevate && !suAvailable) {
-            Log.i("server: root capture on but su not available; using shell");
-        }
-
-        if (suAvailable) {
-            String scid = newScid();
-            String plain = buildCmdline(version, scid);
-            String elevated = elevateCmd(plain);
-            Log.i("spawn server (root) ver=%s scid=%s", version, scid);
-            Log.i("cmdline: %s", elevated);
-            try {
-                return spawnAndConnect(elevated, scid);
-            } catch (Exception e) {
-                Log.w("server: root elevate failed, falling back to shell: %s", e);
-                closeShell();
-                serverEof = false;
+        if (wantElevate) {
+            SuProbeResult probe = probeSu();
+            if (probe == SuProbeResult.OK) {
+                String scid = newScid();
+                String plain = buildCmdline(version, scid);
+                String elevated = elevateCmd(plain);
+                Log.i("spawn server (root) ver=%s scid=%s form=%s", version, scid, suForm);
+                Log.i("cmdline: %s", elevated);
+                try {
+                    Streams streams = spawnAndConnect(elevated, scid);
+                    elevateStatus = ElevateStatus.ROOT;
+                    return streams;
+                } catch (Exception e) {
+                    Log.w("server: root elevate failed, falling back to shell: %s", e);
+                    closeShell();
+                    serverEof = false;
+                    elevateStatus = ElevateStatus.FALLBACK;
+                }
+            } else if (probe == SuProbeResult.DENIED) {
+                elevateStatus = ElevateStatus.DENIED;
+                Log.i("server: su denied/timeout; using shell (secure layers will stay black)");
+            } else {
+                elevateStatus = ElevateStatus.UNAVAILABLE;
+                Log.i("server: root capture on but su not available; using shell");
             }
         }
 
@@ -138,8 +175,11 @@ public final class Server {
         }
     }
 
-    // Magisk / KernelSU: `su 0` runs the command as uid 0.
-    private static String elevateCmd(String plain) {
+    // Magisk / KernelSU: `su 0` runs as uid 0; `su -c` is the portable form.
+    private String elevateCmd(String plain) {
+        if ("su_c".equals(suForm)) {
+            return "su -c " + shellSingleQuote(plain);
+        }
         return "su 0 sh -c " + shellSingleQuote(plain);
     }
 
@@ -148,50 +188,112 @@ public final class Server {
         return "'" + s.replace("'", "'\''") + "'";
     }
 
-    // Best-effort: true only when `su 0 id -u` reports 0 within a short budget.
-    private boolean probeSu() {
+    private enum SuProbeResult { OK, UNAVAILABLE, DENIED }
+
+    // Wait long enough for Magisk/KernelSU to show the Superuser dialog on
+    // the TARGET and for the user to tap Allow. Closing early cancels the
+    // request (dialog never sticks / never appears). Magisk may also
+    // auto-grant ADB "shell" with only a toast — that still returns OK.
+    private static final long SU_PROMPT_MS = 60_000L;
+
+    private SuProbeResult probeSu() {
+        // Prefer Magisk-style `su 0`, then portable `su -c`.
+        // Stop on DENIED/timeout — a second 60s wait would only annoy the user
+        // after they already ignored/denied the Magisk dialog.
+        String[][] forms = {
+                {"su0", "su 0 id -u"},
+                {"su_c", "su -c " + shellSingleQuote("id -u")},
+        };
+        SuProbeResult worst = SuProbeResult.UNAVAILABLE;
+        for (String[] form : forms) {
+            SuProbeResult r = probeSuOnce(form[0], form[1]);
+            if (r == SuProbeResult.OK) return SuProbeResult.OK;
+            if (r == SuProbeResult.DENIED) return SuProbeResult.DENIED;
+            worst = r;
+        }
+        return worst;
+    }
+
+    private SuProbeResult probeSuOnce(String formName, String cmd) {
         AdbStream s = null;
         Thread reader = null;
         final StringBuilder out = new StringBuilder();
+        final long started = monotonicMs();
         try {
-            s = adb.openShell("su 0 id -u");
+            Log.i("server: su probe begin form=%s (wait up to %d ms for Magisk grant on target)",
+                    formName, SU_PROMPT_MS);
+            s = adb.openShell(cmd);
             AdbStream ref = s;
             reader = new Thread(() -> {
                 try (InputStream in = ref.openInputStream()) {
-                    byte[] buf = new byte[64];
+                    byte[] buf = new byte[128];
                     int n;
                     while ((n = in.read(buf)) > 0) {
                         for (int i = 0; i < n; i++) {
                             char c = (char) (buf[i] & 0xff);
                             if (c >= 0x20 && c <= 0x7e) out.append(c);
+                            else if (c == '\n' || c == '\r') out.append(' ');
                         }
-                        if (out.length() > 32) break;
+                        if (out.length() > 96) break;
                     }
                 } catch (IOException ignored) {}
             }, "su-probe");
             reader.setDaemon(true);
             reader.start();
-            reader.join(2_500L);
+            reader.join(SU_PROMPT_MS);
+            boolean timedOut = reader.isAlive();
             String textOut = out.toString().trim();
-            boolean ok = false;
-            if (!textOut.isEmpty()) {
-                int end = 0;
-                while (end < textOut.length() && Character.isDigit(textOut.charAt(end))) end++;
-                if (end > 0) {
-                    try { ok = Integer.parseInt(textOut.substring(0, end)) == 0; }
-                    catch (NumberFormatException ignored) {}
-                }
-                if (!ok) ok = textOut.contains("uid=0");
+            boolean ok = looksLikeUid0(textOut);
+            long elapsed = monotonicMs() - started;
+            if (ok) {
+                suForm = formName;
+                Log.i("server: su probe OK form=%s elapsed=%d ms raw=%s",
+                        formName, elapsed, textOut);
+                return SuProbeResult.OK;
             }
-            Log.i("server: su probe -> %s (raw=%s)", ok, textOut);
-            return ok;
+            if (looksLikeSuDenied(textOut)) {
+                Log.i("server: su probe DENIED form=%s elapsed=%d ms raw=%s",
+                        formName, elapsed, textOut);
+                return SuProbeResult.DENIED;
+            }
+            if (timedOut) {
+                Log.i("server: su probe TIMEOUT form=%s (Magisk dialog not granted in time) raw=%s",
+                        formName, textOut);
+                return SuProbeResult.DENIED;
+            }
+            Log.i("server: su probe UNAVAILABLE form=%s elapsed=%d ms raw=%s",
+                    formName, elapsed, textOut);
+            return SuProbeResult.UNAVAILABLE;
         } catch (Exception e) {
-            Log.i("server: su probe failed: %s", e);
-            return false;
+            Log.i("server: su probe failed form=%s: %s", formName, e);
+            return SuProbeResult.UNAVAILABLE;
         } finally {
             if (reader != null && reader.isAlive()) reader.interrupt();
             closeQuietly(s);
         }
+    }
+
+    private static boolean looksLikeUid0(String textOut) {
+        if (textOut == null || textOut.isEmpty()) return false;
+        if (textOut.contains("uid=0")) return true;
+        int end = 0;
+        while (end < textOut.length() && Character.isDigit(textOut.charAt(end))) end++;
+        if (end > 0) {
+            try { return Integer.parseInt(textOut.substring(0, end)) == 0; }
+            catch (NumberFormatException ignored) {}
+        }
+        return false;
+    }
+
+    private static boolean looksLikeSuDenied(String textOut) {
+        if (textOut == null || textOut.isEmpty()) return false;
+        String lower = textOut.toLowerCase(Locale.ROOT);
+        return lower.contains("permission denied")
+                || lower.contains("not allowed")
+                || lower.contains("access denied")
+                || lower.contains("request rejected")
+                || lower.contains("denied")
+                || lower.startsWith("su:");
     }
 
     // Idempotent. Closes the three media/control streams first (lets
