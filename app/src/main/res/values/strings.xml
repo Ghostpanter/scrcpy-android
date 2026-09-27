@@ -137,4 +137,19 @@
     <string name="donate_saved">已保存到相册</string>
     <string name="donate_save_failed">保存失败：%1$s</string>
 
+
+    <!-- Blind unlock assist (mirror overlay) -->
+    <string name="unlock_assist">解锁</string>
+    <string name="unlock_assist_title">盲输解锁</string>
+    <string name="unlock_assist_help">Android 12+ 因 FLAG_SECURE，锁屏、加密相册/图库预览及银行等安全界面在镜像中会显示为黑屏（平台限制，非 root 无法完整显示画面）。可用此键盘盲输 PIN/密码；图案锁请先在手机上解锁。加密相册内容无法远程预览。</string>
+    <string name="unlock_wake">亮屏</string>
+    <string name="unlock_enter">确定</string>
+    <string name="unlock_close">关闭</string>
+    <string name="unlock_power">电源键</string>
+
+    <!-- Settings: secure content / root guidance -->
+    <string name="secure_content_title">安全内容 / Root</string>
+    <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏请先在手机上点亮。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用画面仍为黑屏，无法远程预览加密相册。</string>
+    <string name="secure_content_root">Root（可选，本应用不附带模块）：在被控端安装 Magisk + LSPosed（Zygisk）+ Disable FLAG_SECURE 模块（io.github.lsposed.disableflagsecure），重启后锁屏、加密相册与银行类应用一般可正常镜像。不会绕过系统安全策略以外的限制。</string>
+
 </resources>

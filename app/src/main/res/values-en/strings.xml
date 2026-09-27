@@ -136,4 +136,19 @@
     <string name="donate_saved">Saved to Photos</string>
     <string name="donate_save_failed">Could not save: %1$s</string>
 
+
+    <!-- Blind unlock assist (mirror overlay) -->
+    <string name="unlock_assist">Unlock</string>
+    <string name="unlock_assist_title">Blind unlock</string>
+    <string name="unlock_assist_help">On Android 12+, FLAG_SECURE makes the lock screen, encrypted album/gallery previews, and banking/secure apps appear black in the mirror (platform limit; no full view without root). Use this keypad to enter PIN/password blindly. Pattern locks: unlock on the phone first. Encrypted album content cannot be previewed remotely.</string>
+    <string name="unlock_wake">Wake</string>
+    <string name="unlock_enter">OK</string>
+    <string name="unlock_close">Close</string>
+    <string name="unlock_power">Power</string>
+
+    <!-- Settings: secure content / root guidance -->
+    <string name="secure_content_title">Secure content / Root</string>
+    <string name="secure_content_nonroot">Non-root: use Unlock on the mirror to enter PIN/password blindly; wake/unlock on the phone first if needed. On Android 12+ the lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
+    <string name="secure_content_root">Root (optional; this app does not bundle modules): on the target install Magisk + LSPosed (Zygisk) + Disable FLAG_SECURE (io.github.lsposed.disableflagsecure), reboot, then lock screen, encrypted gallery, and banking apps usually mirror normally.</string>
+
 </resources>

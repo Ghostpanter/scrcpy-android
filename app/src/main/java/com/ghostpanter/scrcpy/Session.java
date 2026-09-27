@@ -187,6 +187,16 @@ public final class Session {
         if (c != null) c.onBack();
     }
 
+    // Wake/back via BACK_OR_SCREEN_ON (screen-on when off, Back when on).
+    public void wakeOrBack() {
+        onBack();
+    }
+
+    public void injectKeycode(int keycode) {
+        Controller c = controller;
+        if (c != null) c.injectKeycode(keycode);
+    }
+
     public void syncClipboard() {
         Controller c = controller;
         if (c != null) c.syncLocalClipboard();

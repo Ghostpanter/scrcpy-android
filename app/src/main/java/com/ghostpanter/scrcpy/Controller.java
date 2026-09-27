@@ -189,6 +189,14 @@ public final class Controller implements ControlStream.InboundSink {
         sender.accept(ControlMessages.backOrScreenOn(ControlMessages.ACTION_UP));
     }
 
+    // Synthetic key tap for the blind-unlock keypad (PIN digits, DEL,
+    // ENTER, POWER). Does not require geometry — key inject is
+    // coordinate-free, so it still works while the picture is black.
+    public void injectKeycode(int keycode) {
+        sendKeycode(ControlMessages.ACTION_DOWN, keycode, /* repeat */ 0, /* meta */ 0);
+        sendKeycode(ControlMessages.ACTION_UP, keycode, 0, 0);
+    }
+
     public void resetVideo() {
         sender.accept(ControlMessages.resetVideo());
         Log.i("controller: reset video");

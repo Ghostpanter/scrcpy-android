@@ -376,6 +376,33 @@
 
         </LinearLayout>
 
+
+        <LinearLayout
+            style="@style/Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                style="@style/SectionHeader"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/secure_content_title"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="@dimen/space_sm"
+                android:text="@string/secure_content_nonroot"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/secure_content_root"/>
+
+        </LinearLayout>
+
         <Button
             android:id="@+id/donate"
             style="@style/Button.Secondary"

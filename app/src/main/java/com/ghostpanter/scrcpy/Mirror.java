@@ -77,6 +77,11 @@ public final class Mirror extends Activity {
     private TextView statusText;
     private Button   reconnectBtn;
 
+    // Blind unlock assist (Android 12+ FLAG_SECURE black screen).
+    private Button unlockFab;
+    private View   unlockPanel;
+    private boolean unlockPanelOpen;
+
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -137,7 +142,10 @@ public final class Mirror extends Activity {
                 systemTopInset = bars.top;
                 changed = true;
             }
-            if (changed) applyLetterbox();
+            if (changed) {
+                applyLetterbox();
+                insetUnlockControls();
+            }
             return insets;
         });
         root.requestApplyInsets();
@@ -147,6 +155,7 @@ public final class Mirror extends Activity {
         reconnectBtn = findViewById(R.id.reconnect);
         insetStatusBar();
         reconnectBtn.setOnClickListener(view -> reconnect());
+        setupUnlockAssist();
         updateStatusBar();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -406,6 +415,13 @@ public final class Mirror extends Activity {
         if (statusBar != null) {
             statusBar.setVisibility(state == State.CONNECTED ? View.GONE : View.VISIBLE);
         }
+        if (unlockFab != null) {
+            unlockFab.setVisibility(state == State.CONNECTED && !unlockPanelOpen
+                    ? View.VISIBLE : View.GONE);
+        }
+        if (state != State.CONNECTED) {
+            hideUnlockPanel();
+        }
         if (state == State.CONNECTED) {
             immersive();
         } else {
@@ -417,6 +433,9 @@ public final class Mirror extends Activity {
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
+        // While the blind-unlock panel is open, swallow surface touches so
+        // they are not injected as remote taps on a black lock/secure screen.
+        if (unlockPanelOpen) return true;
         if (session != null) {
             session.onTouch(ev);
             return true;
@@ -612,6 +631,91 @@ public final class Mirror extends Activity {
             return windowInsets;
         });
         statusBar.requestApplyInsets();
+    }
+
+    // ---- blind unlock assist ----
+
+    private void setupUnlockAssist() {
+        unlockFab = findViewById(R.id.unlock_fab);
+        unlockPanel = findViewById(R.id.unlock_panel);
+        if (unlockFab == null || unlockPanel == null) {
+            Log.w("mirror: unlock assist views missing");
+            return;
+        }
+        unlockFab.setOnClickListener(v -> showUnlockPanel());
+        findViewById(R.id.unlock_close).setOnClickListener(v -> hideUnlockPanel());
+        findViewById(R.id.unlock_wake).setOnClickListener(v -> {
+            if (session != null) session.wakeOrBack();
+        });
+        findViewById(R.id.unlock_power).setOnClickListener(v ->
+                injectUnlockKey(KeyEvent.KEYCODE_POWER));
+
+        int[] digitIds = {
+                R.id.unlock_key_0, R.id.unlock_key_1, R.id.unlock_key_2,
+                R.id.unlock_key_3, R.id.unlock_key_4, R.id.unlock_key_5,
+                R.id.unlock_key_6, R.id.unlock_key_7, R.id.unlock_key_8,
+                R.id.unlock_key_9,
+        };
+        int[] digitCodes = {
+                KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_2,
+                KeyEvent.KEYCODE_3, KeyEvent.KEYCODE_4, KeyEvent.KEYCODE_5,
+                KeyEvent.KEYCODE_6, KeyEvent.KEYCODE_7, KeyEvent.KEYCODE_8,
+                KeyEvent.KEYCODE_9,
+        };
+        for (int i = 0; i < digitIds.length; i++) {
+            final int code = digitCodes[i];
+            findViewById(digitIds[i]).setOnClickListener(v -> injectUnlockKey(code));
+        }
+        findViewById(R.id.unlock_key_del).setOnClickListener(v ->
+                injectUnlockKey(KeyEvent.KEYCODE_DEL));
+        findViewById(R.id.unlock_key_enter).setOnClickListener(v ->
+                injectUnlockKey(KeyEvent.KEYCODE_ENTER));
+        insetUnlockControls();
+    }
+
+    private void injectUnlockKey(int keycode) {
+        if (session == null) return;
+        session.injectKeycode(keycode);
+    }
+
+    private void showUnlockPanel() {
+        if (unlockPanel == null) return;
+        unlockPanelOpen = true;
+        unlockPanel.setVisibility(View.VISIBLE);
+        if (unlockFab != null) unlockFab.setVisibility(View.GONE);
+        insetUnlockControls();
+    }
+
+    private void hideUnlockPanel() {
+        unlockPanelOpen = false;
+        if (unlockPanel != null) unlockPanel.setVisibility(View.GONE);
+        if (unlockFab != null) {
+            unlockFab.setVisibility(state == State.CONNECTED ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void insetUnlockControls() {
+        int base = getResources().getDimensionPixelSize(R.dimen.space_lg);
+        int bottom = base + gestureBottomInset;
+        if (unlockFab != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) unlockFab.getLayoutParams();
+            if (lp.bottomMargin != bottom || lp.rightMargin != base) {
+                lp.bottomMargin = bottom;
+                lp.rightMargin = base;
+                unlockFab.setLayoutParams(lp);
+            }
+        }
+        if (unlockPanel != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) unlockPanel.getLayoutParams();
+            int side = getResources().getDimensionPixelSize(R.dimen.space_md);
+            if (lp.bottomMargin != bottom
+                    || lp.leftMargin != side || lp.rightMargin != side) {
+                lp.bottomMargin = bottom;
+                lp.leftMargin = side;
+                lp.rightMargin = side;
+                unlockPanel.setLayoutParams(lp);
+            }
+        }
     }
 
     private static boolean shouldForward(KeyEvent ev) {
