@@ -413,6 +413,13 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:paddingTop="@dimen/space_sm"
+                android:text="@string/secure_content_magisk"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="@dimen/space_sm"
                 android:text="@string/secure_content_lsposed"/>
 
             <CheckBox

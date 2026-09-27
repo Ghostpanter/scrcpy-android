@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.17-ghostpanter` |
-| versionCode | `28` |
+| versionName | `0.5.18-ghostpanter` |
+| versionCode | `29` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -110,6 +110,24 @@ before `assembleRelease`.
 
 
 
+
+### Secure capture / ih8SecureLock-scrcpy Zygisk (vc29 / 0.5.18)
+
+**User confirmed (MI 9 HyperOS Android 16):** Magisk Zygisk module
+[ih8SecureLock-scrcpy v10.2](https://github.com/Ghostpanter/ih8SecureLock-scrcpy/releases/download/v10.2-scrcpy/ih8SecureLock-scrcpy-v10.2-scrcpy.zip)
+([repo](https://github.com/Ghostpanter/ih8SecureLock-scrcpy)) unlocks FLAG_SECURE /
+encrypted albums for scrcpy **without LSPosed**. Steps: enable Zygisk → install zip →
+reboot → do not DenyList target apps → optional disable LSPosed Enable Screenshot →
+verify with scrcpy.
+
+**Defaults:** `DEFAULT_ROOT_CAPTURE` / 「Root 提权捕获安全层」 is **OFF** (opt-in).
+Do not auto-force Magisk secure elevate on connect; prefer the Zygisk module.
+
+**LSPosed remains secondary docs only:** System Framework scope only (not SystemUI);
+avoid Enable Screenshot v5.0.1 (can break wireless ADB); prefer v4.2.0.
+
+**UI:** Settings + OEM-reject tip lead with Magisk Zygisk module instructions,
+then LSPosed as backup.
 
 ### Secure capture / LSPosed System Framework scope (vc28 / 0.5.17)
 

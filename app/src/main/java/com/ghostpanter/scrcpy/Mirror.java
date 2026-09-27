@@ -409,7 +409,8 @@ public final class Mirror extends Activity {
             String dialogMsg = msg + "\n\n" + getString(R.string.elevate_open_logs_hint);
             if (status == Server.ElevateStatus.SECURE_OEM_REJECTED) {
                 // Soft tip: exact Framework-only LSPosed recipe (toast truncates).
-                dialogMsg = msg + "\n\n" + getString(R.string.secure_content_lsposed)
+                dialogMsg = msg + "\n\n" + getString(R.string.secure_content_magisk)
+                        + "\n\n" + getString(R.string.secure_content_lsposed)
                         + "\n\n" + getString(R.string.elevate_open_logs_hint);
             }
             new AlertDialog.Builder(this)

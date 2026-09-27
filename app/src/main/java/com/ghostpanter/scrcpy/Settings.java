@@ -37,8 +37,9 @@ public final class Settings {
     // can read whatever is copied on this device and write anything it
     // likes back - and because there was previously no way to decline.
     public static final boolean DEFAULT_CLIPBOARD     = true;
-    // Default ON: when the target has su we elevate; when not, probe is a no-op.
-    public static final boolean DEFAULT_ROOT_CAPTURE  = true;
+    // Default OFF: opt-in only. Prefer Magisk Zygisk ih8SecureLock-scrcpy for
+    // FLAG_SECURE; do not auto-force Magisk secure-elevate on connect.
+    public static final boolean DEFAULT_ROOT_CAPTURE  = false;
     public static final boolean DEFAULT_PREFER_SHIZUKU = true;
 
     private Settings() {}

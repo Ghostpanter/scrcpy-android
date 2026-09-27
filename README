@@ -168,9 +168,20 @@ HyperOS secure layers (optional)
 Normal mirroring does not need root or LSPosed. On some HyperOS / Android 16
 builds, Magisk elevation alone still cannot create a secure virtual display
 (`SECURE_VD_OEM_REJECT`); lock screen and encrypted albums stay black in the
-mirror.
+mirror. In Settings, **Root elevate secure capture** is **off by default**
+(opt-in); prefer the Zygisk module below rather than forcing Magisk elevate.
 
-Then on the **target** (not bundled in this APK):
+**Preferred (verified MI 9 HyperOS A16)** — Magisk Zygisk module, no LSPosed:
+
+1. Magisk → enable Zygisk
+2. Install [ih8SecureLock-scrcpy v10.2](https://github.com/Ghostpanter/ih8SecureLock-scrcpy/releases/download/v10.2-scrcpy/ih8SecureLock-scrcpy-v10.2-scrcpy.zip)
+   ([repo](https://github.com/Ghostpanter/ih8SecureLock-scrcpy))
+3. Reboot
+4. Do **not** DenyList the target apps
+5. Optional: disable LSPosed Enable Screenshot if previously installed
+6. Connect with scrcpy-android and verify secure layers are visible
+
+**Secondary** — LSPosed (only if not using the Zygisk module):
 
 1. Magisk → enable Zygisk
 2. Install [JingMatrix LSPosed](https://github.com/JingMatrix/LSPosed)
@@ -182,7 +193,7 @@ Then on the **target** (not bundled in this APK):
 
 scrcpy captures via DisplayManager/SurfaceFlinger in system_server; Framework
 hooks unlock FLAG_SECURE for that path. SystemUI scope is unnecessary for this
-OEM encrypted-album case and may hurt.
+OEM encrypted-album case and may hurt. Neither module is bundled in this APK.
 
 License
 -------
