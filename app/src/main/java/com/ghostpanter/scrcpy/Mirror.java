@@ -79,9 +79,13 @@ public final class Mirror extends Activity {
     private Button   reconnectBtn;
     private Button   disconnectBtn;
 
-    // Blind unlock assist (Android 12+ FLAG_SECURE black screen).
-    private Button unlockFab;
-    private View   unlockPanel;
+    // Minimal expandable actions (unlock + disconnect) + blind unlock keypad.
+    private Button  mirrorMenuFab;
+    private View    mirrorMenuPanel;
+    private View    mirrorMenuScrim;
+    private Button  unlockFab;
+    private View    unlockPanel;
+    private boolean mirrorMenuOpen;
     private boolean unlockPanelOpen;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -146,7 +150,7 @@ public final class Mirror extends Activity {
             }
             if (changed) {
                 applyLetterbox();
-                insetUnlockControls();
+                insetMirrorControls();
             }
             return insets;
         });
@@ -161,7 +165,7 @@ public final class Mirror extends Activity {
         if (disconnectBtn != null) {
             disconnectBtn.setOnClickListener(view -> disconnectAndLeave());
         }
-        setupUnlockAssist();
+        setupMirrorActions();
         updateStatusBar();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -505,21 +509,17 @@ public final class Mirror extends Activity {
         }
         statusText.setText(s);
         reconnectBtn.setVisibility(state == State.DISCONNECTED ? View.VISIBLE : View.GONE);
-        // Disconnect stays available while mirroring / connecting / after drop.
-        if (disconnectBtn != null) disconnectBtn.setVisibility(View.VISIBLE);
 
-        // Keep the status pill visible (including while CONNECTED) so
-        // 「断开连接」 is always easy to tap — not only buried behind Back×2.
+        // While CONNECTED the status pill hides so it does not cover the
+        // preview; reconnect / connecting still need the pill. Disconnect
+        // and unlock live in the minimal expandable menu FAB.
         if (statusBar != null) {
-            statusBar.setVisibility(View.VISIBLE);
-        }
-        if (unlockFab != null) {
-            unlockFab.setVisibility(state == State.CONNECTED && !unlockPanelOpen
-                    ? View.VISIBLE : View.GONE);
+            statusBar.setVisibility(state == State.CONNECTED ? View.GONE : View.VISIBLE);
         }
         if (state != State.CONNECTED) {
             hideUnlockPanel();
         }
+        refreshMirrorActionsVisibility();
         if (state == State.CONNECTED) {
             immersive();
         } else {
@@ -534,6 +534,12 @@ public final class Mirror extends Activity {
         // While the blind-unlock panel is open, swallow surface touches so
         // they are not injected as remote taps on a black lock/secure screen.
         if (unlockPanelOpen) return true;
+        // Expanded actions menu uses its own scrim; if a touch still reaches
+        // here, collapse rather than injecting a remote tap.
+        if (mirrorMenuOpen) {
+            collapseMirrorMenu();
+            return true;
+        }
         if (session != null) {
             session.onTouch(ev);
             return true;
@@ -555,6 +561,14 @@ public final class Mirror extends Activity {
     private long lastBackAtMs;
 
     private void onBackRequested() {
+        if (unlockPanelOpen) {
+            hideUnlockPanel();
+            return;
+        }
+        if (mirrorMenuOpen) {
+            collapseMirrorMenu();
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         if (now - lastBackAtMs < DOUBLE_BACK_MS) {
             finish();
@@ -731,44 +745,109 @@ public final class Mirror extends Activity {
         statusBar.requestApplyInsets();
     }
 
-    // ---- blind unlock assist ----
+    // ---- minimal expandable mirror actions + blind unlock ----
 
-    private void setupUnlockAssist() {
+    private void setupMirrorActions() {
+        mirrorMenuFab = findViewById(R.id.mirror_menu_fab);
+        mirrorMenuPanel = findViewById(R.id.mirror_menu_panel);
+        mirrorMenuScrim = findViewById(R.id.mirror_menu_scrim);
         unlockFab = findViewById(R.id.unlock_fab);
         unlockPanel = findViewById(R.id.unlock_panel);
-        if (unlockFab == null || unlockPanel == null) {
-            Log.w("mirror: unlock assist views missing");
-            return;
+        if (mirrorMenuFab == null || mirrorMenuPanel == null) {
+            Log.w("mirror: mirror actions views missing");
+        } else {
+            mirrorMenuFab.setOnClickListener(v -> toggleMirrorMenu());
+            if (mirrorMenuScrim != null) {
+                mirrorMenuScrim.setOnClickListener(v -> collapseMirrorMenu());
+            }
         }
-        unlockFab.setOnClickListener(v -> showUnlockPanel());
-        findViewById(R.id.unlock_close).setOnClickListener(v -> hideUnlockPanel());
-        findViewById(R.id.unlock_wake).setOnClickListener(v -> {
-            if (session != null) session.wakeOrBack();
-        });
-        findViewById(R.id.unlock_power).setOnClickListener(v ->
-                injectUnlockKey(KeyEvent.KEYCODE_POWER));
+        if (unlockFab != null) {
+            unlockFab.setOnClickListener(v -> {
+                collapseMirrorMenu();
+                showUnlockPanel();
+            });
+        }
+        if (unlockPanel == null) {
+            Log.w("mirror: unlock assist panel missing");
+        } else {
+            findViewById(R.id.unlock_close).setOnClickListener(v -> hideUnlockPanel());
+            findViewById(R.id.unlock_wake).setOnClickListener(v -> {
+                if (session != null) session.wakeOrBack();
+            });
+            findViewById(R.id.unlock_power).setOnClickListener(v ->
+                    injectUnlockKey(KeyEvent.KEYCODE_POWER));
 
-        int[] digitIds = {
-                R.id.unlock_key_0, R.id.unlock_key_1, R.id.unlock_key_2,
-                R.id.unlock_key_3, R.id.unlock_key_4, R.id.unlock_key_5,
-                R.id.unlock_key_6, R.id.unlock_key_7, R.id.unlock_key_8,
-                R.id.unlock_key_9,
-        };
-        int[] digitCodes = {
-                KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_2,
-                KeyEvent.KEYCODE_3, KeyEvent.KEYCODE_4, KeyEvent.KEYCODE_5,
-                KeyEvent.KEYCODE_6, KeyEvent.KEYCODE_7, KeyEvent.KEYCODE_8,
-                KeyEvent.KEYCODE_9,
-        };
-        for (int i = 0; i < digitIds.length; i++) {
-            final int code = digitCodes[i];
-            findViewById(digitIds[i]).setOnClickListener(v -> injectUnlockKey(code));
+            int[] digitIds = {
+                    R.id.unlock_key_0, R.id.unlock_key_1, R.id.unlock_key_2,
+                    R.id.unlock_key_3, R.id.unlock_key_4, R.id.unlock_key_5,
+                    R.id.unlock_key_6, R.id.unlock_key_7, R.id.unlock_key_8,
+                    R.id.unlock_key_9,
+            };
+            int[] digitCodes = {
+                    KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_2,
+                    KeyEvent.KEYCODE_3, KeyEvent.KEYCODE_4, KeyEvent.KEYCODE_5,
+                    KeyEvent.KEYCODE_6, KeyEvent.KEYCODE_7, KeyEvent.KEYCODE_8,
+                    KeyEvent.KEYCODE_9,
+            };
+            for (int i = 0; i < digitIds.length; i++) {
+                final int code = digitCodes[i];
+                findViewById(digitIds[i]).setOnClickListener(v -> injectUnlockKey(code));
+            }
+            findViewById(R.id.unlock_key_del).setOnClickListener(v ->
+                    injectUnlockKey(KeyEvent.KEYCODE_DEL));
+            findViewById(R.id.unlock_key_enter).setOnClickListener(v ->
+                    injectUnlockKey(KeyEvent.KEYCODE_ENTER));
         }
-        findViewById(R.id.unlock_key_del).setOnClickListener(v ->
-                injectUnlockKey(KeyEvent.KEYCODE_DEL));
-        findViewById(R.id.unlock_key_enter).setOnClickListener(v ->
-                injectUnlockKey(KeyEvent.KEYCODE_ENTER));
-        insetUnlockControls();
+        insetMirrorControls();
+        refreshMirrorActionsVisibility();
+    }
+
+    private void toggleMirrorMenu() {
+        if (mirrorMenuOpen) collapseMirrorMenu();
+        else expandMirrorMenu();
+    }
+
+    private void expandMirrorMenu() {
+        if (mirrorMenuPanel == null) return;
+        mirrorMenuOpen = true;
+        mirrorMenuPanel.setVisibility(View.VISIBLE);
+        if (mirrorMenuScrim != null) mirrorMenuScrim.setVisibility(View.VISIBLE);
+        if (mirrorMenuFab != null) {
+            mirrorMenuFab.setVisibility(View.GONE);
+            mirrorMenuFab.setContentDescription(getString(R.string.mirror_actions_collapse));
+        }
+        if (unlockFab != null) {
+            unlockFab.setVisibility(state == State.CONNECTED ? View.VISIBLE : View.GONE);
+        }
+        if (disconnectBtn != null) disconnectBtn.setVisibility(View.VISIBLE);
+        insetMirrorControls();
+    }
+
+    private void collapseMirrorMenu() {
+        mirrorMenuOpen = false;
+        if (mirrorMenuPanel != null) mirrorMenuPanel.setVisibility(View.GONE);
+        if (mirrorMenuScrim != null) mirrorMenuScrim.setVisibility(View.GONE);
+        refreshMirrorActionsVisibility();
+    }
+
+    private void refreshMirrorActionsVisibility() {
+        // FAB stays available in every session state so disconnect is one
+        // tap away, but hides while the unlock keypad is open.
+        boolean showFab = !unlockPanelOpen && !mirrorMenuOpen
+                && (mirrorMenuFab != null);
+        if (mirrorMenuFab != null) {
+            mirrorMenuFab.setVisibility(showFab ? View.VISIBLE : View.GONE);
+            mirrorMenuFab.setContentDescription(getString(R.string.mirror_actions_expand));
+        }
+        if (!mirrorMenuOpen && mirrorMenuPanel != null) {
+            mirrorMenuPanel.setVisibility(View.GONE);
+        }
+        if (!mirrorMenuOpen && mirrorMenuScrim != null) {
+            mirrorMenuScrim.setVisibility(View.GONE);
+        }
+        if (unlockFab != null && mirrorMenuOpen) {
+            unlockFab.setVisibility(state == State.CONNECTED ? View.VISIBLE : View.GONE);
+        }
     }
 
     private void injectUnlockKey(int keycode) {
@@ -780,39 +859,55 @@ public final class Mirror extends Activity {
         if (unlockPanel == null) return;
         unlockPanelOpen = true;
         unlockPanel.setVisibility(View.VISIBLE);
-        if (unlockFab != null) unlockFab.setVisibility(View.GONE);
-        insetUnlockControls();
+        collapseMirrorMenu();
+        if (mirrorMenuFab != null) mirrorMenuFab.setVisibility(View.GONE);
+        insetMirrorControls();
     }
 
     private void hideUnlockPanel() {
         unlockPanelOpen = false;
         if (unlockPanel != null) unlockPanel.setVisibility(View.GONE);
-        if (unlockFab != null) {
-            unlockFab.setVisibility(state == State.CONNECTED ? View.VISIBLE : View.GONE);
-        }
+        refreshMirrorActionsVisibility();
     }
 
-    private void insetUnlockControls() {
+    private void insetMirrorControls() {
         int base = getResources().getDimensionPixelSize(R.dimen.space_lg);
         int bottom = base + gestureBottomInset;
-        if (unlockFab != null) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) unlockFab.getLayoutParams();
+        if (mirrorMenuFab != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mirrorMenuFab.getLayoutParams();
             if (lp.bottomMargin != bottom || lp.rightMargin != base) {
                 lp.bottomMargin = bottom;
                 lp.rightMargin = base;
-                unlockFab.setLayoutParams(lp);
+                mirrorMenuFab.setLayoutParams(lp);
+            }
+        }
+        if (mirrorMenuPanel != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) mirrorMenuPanel.getLayoutParams();
+            if (lp.bottomMargin != bottom || lp.rightMargin != base) {
+                lp.bottomMargin = bottom;
+                lp.rightMargin = base;
+                mirrorMenuPanel.setLayoutParams(lp);
             }
         }
         if (unlockPanel != null) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) unlockPanel.getLayoutParams();
             int side = getResources().getDimensionPixelSize(R.dimen.space_md);
-            if (lp.bottomMargin != bottom
-                    || lp.leftMargin != side || lp.rightMargin != side) {
-                lp.bottomMargin = bottom;
+            // Cap width on tablets so the keypad stays thumb-reachable.
+            int maxW = (int) (480f * getResources().getDisplayMetrics().density + 0.5f);
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            if (screenW > maxW + side * 2) {
+                lp.width = maxW;
+                lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                lp.leftMargin = 0;
+                lp.rightMargin = 0;
+            } else {
+                lp.width = FrameLayout.LayoutParams.MATCH_PARENT;
+                lp.gravity = Gravity.BOTTOM;
                 lp.leftMargin = side;
                 lp.rightMargin = side;
-                unlockPanel.setLayoutParams(lp);
             }
+            lp.bottomMargin = bottom;
+            unlockPanel.setLayoutParams(lp);
         }
     }
 

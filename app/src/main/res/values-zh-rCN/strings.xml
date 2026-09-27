@@ -167,6 +167,12 @@
     <string name="donate_save_failed">保存失败：%1$s</string>
 
 
+
+    <!-- Minimal expandable mirror actions (unlock + disconnect) -->
+    <string name="mirror_actions">操作</string>
+    <string name="mirror_actions_expand">展开操作</string>
+    <string name="mirror_actions_collapse">收起操作</string>
+
     <!-- Blind unlock assist (mirror overlay) -->
     <string name="unlock_assist">解锁</string>
     <string name="unlock_assist_title">盲输解锁</string>

@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-Updated: 2026-09-27 22:30 HKT (UTC+8)
+Updated: 2026-09-27 22:45 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 
@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.18-ghostpanter` |
-| versionCode | `29` |
+| versionName | `0.5.19-ghostpanter` |
+| versionCode | `30` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -110,6 +110,20 @@ before `assembleRelease`.
 
 
 
+
+
+
+### Mirror UI — expandable unlock+disconnect (vc30 / 0.5.19)
+
+Unlock (盲输 PIN) and Disconnect are merged into one **minimal expandable**
+control on the mirror/preview screen. Default: tiny FAB (`⋮`) at bottom-end
+so the preview stays clear. Tap to expand → 解锁 + 断开连接; tap again or
+outside (scrim) / Back to collapse. Unlock still opens the existing keypad.
+Status pill hides while CONNECTED (reconnect/connecting still show it).
+Phone and tablet; keypad max-width centred on large screens.
+
+**Defaults unchanged from 0.5.18:** `DEFAULT_ROOT_CAPTURE` / Root elevate OFF;
+prefer ih8SecureLock-scrcpy Zygisk; Magisk settings/docs intact.
 
 ### Secure capture / ih8SecureLock-scrcpy Zygisk (vc29 / 0.5.18)
 
