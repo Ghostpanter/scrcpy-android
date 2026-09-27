@@ -62,7 +62,7 @@ the repo under `/workspace/secrets/`).
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
 | versionName | `0.5.9-ghostpanter` |
-| versionCode | `19` |
+| versionCode | `20` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -76,6 +76,23 @@ the repo under `/workspace/secrets/`).
 - The broken unsigned v0.5.9 asset never installed, so most users only
   need a fresh install of the replaced asset.
 
+
+### Elevate / connect (vc20)
+
+- **Root cause (user Magisk logs):** Magisk granted uid 0, then
+  `scrcpy-gp-start.sh[11]: CLASSPATH=/data/local/tmp/scrcpy-server.jar: inaccessible or not found`
+  → `server exited before opening scrcpy_*`. Under Magisk/mksh, `exec CLASSPATH=jar app_process`
+  treats `CLASSPATH=...` as the binary name.
+- **Fix:** start script now `export CLASSPATH=<jar>` then
+  `exec /system/bin/app_process / com.genymobile.scrcpy.Server ...` (absolute path).
+- **Jar visibility:** copy jar into `/dev/.scrcpy-gp-server.jar` or `/data/adb/` inside the
+  elevated script so Magisk mount-ns isolation cannot hide adbd's `/data/local/tmp`.
+- **Recipes:** prefer Magisk-friendly `su -c`; demote `nsenter`; on confirmed uid0 +
+  structural CLASSPATH/exec failure **stop cascading** (keeps ADB connection alive —
+  do not close the AdbConnection on recipe failure).
+- vc19 file-uid verify + in-app log viewer retained.
+
+### Elevate / connect (vc19)
 ### Elevate / connect (vc19)
 
 - Quick su probe (~1.5s). If Magisk already granted ADB shell → skip 60s wait.

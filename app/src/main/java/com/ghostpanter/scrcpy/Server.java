@@ -103,6 +103,8 @@ public final class Server {
     private String suForm;
     /** Last elevate failure transcript (for toast / log viewer). */
     private volatile String lastElevateDetail = "";
+    /** Stdout captured during elevated uid wait (structural-error detection). */
+    private volatile String lastElevateStdout = "";
     /** Fired when we enter the long Magisk-grant wait (not on already-granted quick path). */
     private volatile Runnable onWaitingForGrant;
 
@@ -151,8 +153,8 @@ public final class Server {
             SuProbeResult probe = probeSu();
             if (probe == SuProbeResult.OK) {
                 String scid = newScid();
-                String plain = buildCmdline(version, scid);
-                pushElevatedStartScript(plain);
+                String serverArgs = buildServerArgs(version, scid);
+                pushElevatedStartScript(serverArgs);
                 Log.i("spawn server (root) ver=%s scid=%s probeForm=%s", version, scid, suForm);
                 try {
                     Streams streams = tryElevatedRecipes(scid);
@@ -229,13 +231,23 @@ public final class Server {
     // non-TTY, Magisk's su -c often fully-buffers stdout until process exit,
     // and exec app_process never exits → false FALLBACK / 提权失败仍黑屏.
     //
-    // vc19: write uid to REMOTE_UID from the elevated script, then poll that
-    // file via a *separate* non-elevated shell. Also try several start recipes
-    // (su -c / su 0 -c / Magisk path / nsenter / interactive su stdin). Every
-    // probe+start transcript goes into the Log ring buffer — never silent.
-    private void pushElevatedStartScript(String plain) throws Exception {
+    // vc19: write uid to REMOTE_UID; poll via separate non-elevated shell.
+    // vc20: Magisk/mksh `exec CLASSPATH=jar app_process` treats CLASSPATH= as
+    // argv0 ("inaccessible or not found"). export CLASSPATH then exec absolute
+    // /system/bin/app_process; copy jar to /dev or /data/adb for mount-ns.
+    // Prefer Magisk-friendly su -c; on uid0 + script structural failure do not
+    // cascade recipes (keeps ADB connection alive).
+    // Magisk/mksh: `exec CLASSPATH=jar app_process ...` treats CLASSPATH=... as the
+    // binary name → "CLASSPATH=...: inaccessible or not found". Always export
+    // CLASSPATH, then exec absolute /system/bin/app_process. Also copy the jar
+    // into a root-visible path (/dev tmpfs or /data/adb) so Magisk mount-ns
+    // isolation cannot hide adbd's /data/local/tmp.
+    private void pushElevatedStartScript(String serverArgs) throws Exception {
         String body = "#!/system/bin/sh\n"
                 + "UF=" + REMOTE_UID + "\n"
+                + "JAR_SRC=" + REMOTE_PATH + "\n"
+                + "JAR_DEV=/dev/.scrcpy-gp-server.jar\n"
+                + "JAR_ADB=/data/adb/scrcpy-gp-server.jar\n"
                 + "rm -f \"$UF\" \"$UF.tmp\"\n"
                 + "uid=$(/system/bin/id -u 2>/dev/null || id -u)\n"
                 + "printf '%s\\n' \"$uid\" > \"$UF.tmp\"\n"
@@ -244,10 +256,29 @@ public final class Server {
                 + "/system/bin/sh -c \"printf 'scrcpy-gp:uid=%s\\n' \\\"$uid\\\"\"\n"
                 + "printf 'scrcpy-gp:uid=%s\\n' \"$uid\" >&2\n"
                 + "[ \"$uid\" = \"0\" ] || exit 42\n"
-                + "exec " + plain + "\n";
+                + "JAR=\"\"\n"
+                + "for c in \"$JAR_SRC\" \"$JAR_ADB\" \"$JAR_DEV\"; do\n"
+                + "  if [ -r \"$c\" ]; then JAR=$c; break; fi\n"
+                + "done\n"
+                + "if [ -z \"$JAR\" ]; then\n"
+                + "  printf 'scrcpy-gp:jar-missing src=%s\\n' \"$JAR_SRC\" >&2\n"
+                + "  exit 43\n"
+                + "fi\n"
+                + "DST=\"$JAR\"\n"
+                + "if cp -f \"$JAR\" \"$JAR_DEV\" 2>/dev/null; then DST=$JAR_DEV; \n"
+                + "elif cp -f \"$JAR\" \"$JAR_ADB\" 2>/dev/null; then DST=$JAR_ADB; fi\n"
+                + "if [ ! -r \"$DST\" ]; then\n"
+                + "  printf 'scrcpy-gp:jar-unreadable path=%s\\n' \"$DST\" >&2\n"
+                + "  exit 43\n"
+                + "fi\n"
+                // Never: exec CLASSPATH=... app_process (mksh treats assignment as argv0).
+                + "export CLASSPATH=\"$DST\"\n"
+                + "printf 'scrcpy-gp:classpath=%s\\n' \"$CLASSPATH\" >&2\n"
+                + "exec /system/bin/app_process / "
+                + serverArgs + "\n";
         pushTextFile(REMOTE_START, body, SCRIPT_MODE);
-        Log.i("server: elevated start script ready path=%s plainLen=%d",
-                REMOTE_START, plain.length());
+        Log.i("server: elevated start script ready path=%s argsLen=%d",
+                REMOTE_START, serverArgs.length());
     }
 
     private static final class ElevateRecipe {
@@ -262,6 +293,9 @@ public final class Server {
     }
 
     private java.util.List<ElevateRecipe> elevateRecipes() {
+        // Prefer Magisk-friendly `su -c` (caller's mount ns keeps /data/local/tmp
+        // visible). Avoid hammering nsenter first — it can hide the jar and burn
+        // the ADB transport while cascading.
         java.util.ArrayList<ElevateRecipe> out = new java.util.ArrayList<>();
         String shStart = "sh " + REMOTE_START;
         String q = shellSingleQuote(shStart);
@@ -281,14 +315,11 @@ public final class Server {
                 "/system/bin/su -c " + q, null));
         add.accept(new ElevateRecipe("debug_ramdisk_su_c",
                 "/debug_ramdisk/su -c " + q, null));
-        add.accept(new ElevateRecipe("sbin_su_c",
-                "/sbin/su -c " + q, null));
+        add.accept(new ElevateRecipe("su_stdin", "su", shStart + "\n"));
+        // Last resort: enter init mount ns only after copying jar inside script.
         String ns = shellSingleQuote(
                 "nsenter --mount=/proc/1/ns/mnt -- /system/bin/sh " + REMOTE_START);
         add.accept(new ElevateRecipe("su_c_nsenter", "su -c " + ns, null));
-        add.accept(new ElevateRecipe("su0_c_nsenter", "su 0 -c " + ns, null));
-        add.accept(new ElevateRecipe("su_stdin", "su", shStart + "\n"));
-        add.accept(new ElevateRecipe("su0_stdin", "su 0", shStart + "\n"));
         return out;
     }
 
@@ -309,6 +340,7 @@ public final class Server {
             transcript.append('\n');
             try {
                 clearRemoteUidFile();
+                lastElevateStdout = "";
                 Streams streams = spawnAndConnectElevated(r, scid, uidWait);
                 Log.i("server: elevate recipe OK name=%s", r.name);
                 suForm = r.name;
@@ -319,8 +351,15 @@ public final class Server {
                 Log.w("server: elevate recipe FAIL name=%s err=%s", r.name, msg);
                 transcript.append("FAIL ").append(r.name).append(" ").append(msg).append('\n');
                 last = e;
+                // Only close the elevate shell stream — never the ADB connection.
                 closeShell();
                 serverEof = false;
+                if (isElevateScriptStructuralFailure(msg)) {
+                    // uid0 reached but start script/exec is wrong; more recipes
+                    // will not help and may drop the ADB transport.
+                    Log.e("server: elevate structural failure after uid0 — stop cascade: %s", msg);
+                    break;
+                }
             }
         }
         String detail = transcript.toString().trim();
@@ -352,9 +391,28 @@ public final class Server {
                         + ") recipe=" + recipe.name);
             }
             Log.i("server: elevated start confirmed uid=0 recipe=%s", recipe.name);
+            if (isElevateScriptStructuralFailure(lastElevateStdout)) {
+                throw new IOException("elevated script structural failure after uid0"
+                        + " recipe=" + recipe.name + ": " + lastElevateStdout.trim());
+            }
             shellPump = new Thread(() -> pump(shellIn), "server-stdout");
             shellPump.setDaemon(true);
             shellPump.start();
+
+            // Failed exec exits immediately; do not burn 70s accept or cascade ADB.
+            long settleDeadline = monotonicMs() + 900;
+            while (monotonicMs() < settleDeadline && !serverEof) {
+                try { Thread.sleep(40); }
+                catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (serverEof) {
+                throw new IOException("elevated server exited immediately after uid0"
+                        + " recipe=" + recipe.name
+                        + (lastElevateStdout.isEmpty() ? "" : (": " + lastElevateStdout.trim())));
+            }
 
             long acceptDeadline = LISTENER_DEADLINE_ELEVATED_MS;
             va = openAbstract(scid, acceptDeadline);
@@ -658,6 +716,7 @@ public final class Server {
 
         final String textOut;
         synchronized (lock) { textOut = out.toString(); }
+        lastElevateStdout = textOut;
         Log.i("server: elevate uid wait done recipe=%s fileUid=%d bannerUid=%d elapsed=%d ms stdout=%s",
                 recipeName, fileUid, bannerUid, monotonicMs() - started, textOut.trim());
 
@@ -665,6 +724,25 @@ public final class Server {
         if (fileUid > 0) return fileUid;
         if (bannerUid > 0) return bannerUid;
         return -1;
+    }
+
+    /**
+     * Magisk already granted uid 0 but the start script/exec is wrong — more
+     * su recipes will not help and may drop the ADB connection. Detect both
+     * the classic mksh CLASSPATH-as-argv0 error and post-uid0 immediate exit.
+     */
+    private static boolean isElevateScriptStructuralFailure(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String t = text.toLowerCase(Locale.ROOT);
+        if (t.contains("after uid0")) return true;
+        if (t.contains("scrcpy-gp:jar-missing") || t.contains("scrcpy-gp:jar-unreadable"))
+            return true;
+        if (t.contains("structural failure")) return true;
+        if (t.contains("classpath=") && (t.contains("inaccessible") || t.contains("not found")))
+            return true;
+        if (t.contains("app_process") && (t.contains("inaccessible") || t.contains("not found")))
+            return true;
+        return false;
     }
 
     private static boolean looksLikeUid0(String textOut) {
@@ -759,7 +837,8 @@ public final class Server {
         return String.format(Locale.ROOT, "%08x", v);
     }
 
-    private String buildCmdline(String version, String scid) {
+    /** Args after `app_process /` (no CLASSPATH / no app_process). */
+    private String buildServerArgs(String version, String scid) {
         String videoCodec = Settings.videoCodec(ctx);
         String audioCodec = Settings.audioCodec(ctx);
         int maxSize     = Settings.maxSize(ctx);
@@ -767,9 +846,6 @@ public final class Server {
         int maxFps      = Settings.maxFps(ctx);
         boolean lowLat  = Settings.lowLatency(ctx);
         List<String> args = new ArrayList<>();
-        args.add("CLASSPATH=" + REMOTE_PATH);
-        args.add("app_process");
-        args.add("/");
         args.add("com.genymobile.scrcpy.Server");
         args.add(version);
         args.add("scid=" + scid);
@@ -792,6 +868,12 @@ public final class Server {
         args.add("cleanup=true");
         args.add("power_on=true");
         return String.join(" ", args);
+    }
+
+    /** Non-elevated ADB shell cmdline. Env assignment works here (no exec). */
+    private String buildCmdline(String version, String scid) {
+        // adb shell: supports VAR=value cmd; do not wrap in exec.
+        return "CLASSPATH=" + REMOTE_PATH + " app_process / " + buildServerArgs(version, scid);
     }
 
     private AdbStream openAbstract(String scid, long deadlineMs) throws Exception {
