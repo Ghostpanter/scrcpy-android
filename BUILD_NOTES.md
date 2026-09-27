@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.11-ghostpanter` |
-| versionCode | `22` |
+| versionName | `0.5.12-ghostpanter` |
+| versionCode | `23` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -105,6 +105,25 @@ required — not bundled. Blind unlock keypad remains as non-root fallback.
 `update-server`, which fetches stock upstream). Asset stays gitignored; rebuild
 before `assembleRelease`.
 
+
+
+### Connect / A16 HyperOS setuid fix (vc23 / 0.5.12)
+
+**Root cause (MI 9 HyperOS Android 16, 0.5.11 failed):** `Server.dropRootPrivileges()`
+does `Os.seteuid(2000)` keeping ruid=0. The ScreenCapture safety net then called
+`Os.setuid(2000)` while **euid was already 2000**. On Linux/Android, `setuid`
+requires euid==0 (or CAP_SETUID), so it failed with
+`IOException: setuid(2000) failed after display create failure` → reconnect loop.
+FakeContext package=`android` under uid==0 did not fix DisplayManager on this OEM.
+
+**Fix:**
+1. Safety net: `Os.seteuid(0)` then `Os.setuid(2000)`, sync Workarounds to
+   `com.android.shell`, log ruid/euid before and after, wrap ErrnoException clearly.
+2. A16 shortcut: if SurfaceControl has no createDisplay and secure already failed,
+   skip futile non-secure DM/SC attempts and go to the drop path sooner. Still try
+   secure once with runAsRootEuid when ruid==0.
+3. After successful drop, normal DisplayManager mirror (vc20-like). Secure capture
+   abandoned after drop — OK; UI still mentions LSPosed for lock/secure on some OEMs.
 
 ### Connect / A16 HyperOS (vc22 / 0.5.11)
 

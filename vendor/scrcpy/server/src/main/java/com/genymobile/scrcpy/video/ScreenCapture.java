@@ -139,6 +139,7 @@ public class ScreenCapture extends SurfaceCapture {
             // Privileged secure capture (Genymobile/scrcpy#4947 / #3049).
             // Main thread already seteuid(2000); restore euid 0 for this call.
             // surface may have been reassigned by the OpenGL filter above — capture final.
+            // Always try secure once while ruid==0; user wants secure when it works.
             final Surface captureSurface = surface;
             final Size captureInputSize = inputSize;
             try {
@@ -150,7 +151,19 @@ public class ScreenCapture extends SurfaceCapture {
             }
         }
 
-        if (virtualDisplay == null && display == null) {
+        // On A16, SurfaceControl.createDisplay is gone. If secure already failed
+        // under ruid=0, HyperOS OEM DisplayManager still rejects packageName vs
+        // uid — skip futile non-secure DM/SC attempts and go to setuid sooner.
+        boolean skipNonSecureFallbacks = root
+                && virtualDisplay == null
+                && display == null
+                && firstFailure != null
+                && !SurfaceControl.hasCreateDisplayMethod();
+        if (skipNonSecureFallbacks) {
+            Ln.i("Display: SurfaceControl unavailable and secure failed; skipping non-secure fallbacks");
+        }
+
+        if (!skipNonSecureFallbacks && virtualDisplay == null && display == null) {
             try {
                 virtualDisplay = ServiceManager.getDisplayManager()
                         .createVirtualDisplay("scrcpy", inputSize.getWidth(), inputSize.getHeight(), displayId, surface);
@@ -190,13 +203,24 @@ public class ScreenCapture extends SurfaceCapture {
         // ruid=0, permanently drop to shell like stock scrcpy and retry once.
         // Guarantees vc20-like connectivity when FakeContext/package fixes are
         // incomplete on some OEMs. Secure capture is abandoned after this.
+        //
+        // Server.dropRootPrivileges() only did seteuid(2000), so euid is already
+        // 2000 here. Linux setuid() requires euid==0 (or CAP_SETUID); calling
+        // setuid(2000) with euid=2000 fails. Restore euid first, then drop both.
         if (virtualDisplay == null && display == null && isRealUidRoot()) {
             Ln.i("Display: falling back to setuid(2000) after root display create failed");
             try {
+                int beforeRuid = Os.getuid();
+                int beforeEuid = Os.geteuid();
+                Ln.i("Display: before drop ruid=" + beforeRuid + " euid=" + beforeEuid);
+                // must restore euid first — currently euid is 2000
+                Os.seteuid(0);
+                // permanently drop ruid+euid to shell
                 Os.setuid(2000);
-                Workarounds.updateFakePackageName(FakeContext.PACKAGE_NAME);
+                Workarounds.updateFakePackageName(FakeContext.PACKAGE_NAME); // com.android.shell
+                Ln.i("Display: after drop ruid=" + Os.getuid() + " euid=" + Os.geteuid());
             } catch (ErrnoException e) {
-                throw new IOException("setuid(2000) failed after display create failure", e);
+                throw new IOException("seteuid(0)/setuid(2000) failed after display create failure", e);
             }
             try {
                 virtualDisplay = ServiceManager.getDisplayManager()
