@@ -47,11 +47,11 @@
     <string name="bit_rate_16m">16 Mbps</string>
     <string name="reconnect">重新连接</string>
     <string name="disconnect">断开连接</string>
-    <string name="elevate_root_ok">已 Root 提权启动 server。若 Magisk 未弹窗，可能已对 ADB shell 自动授权；安全层应用应可显示。</string>
-    <string name="elevate_su_denied">被控端 su 未授权或超时。请在被控端 Magisk 弹窗点允许（或超级用户 → shell/ADB 设为允许），然后点重新连接。安全层应用目前仍为黑屏。</string>
-    <string name="elevate_su_unavailable">被控端未检测到可用 su（无 Root / 未装 Magisk）。安全层（FLAG_SECURE）应用将保持黑屏；可用「解锁」盲输 PIN，或安装 Magisk 并开启 Root 提权。</string>
-    <string name="elevate_fallback">Root 提权启动失败，已回退普通 shell。安全层应用可能仍为黑屏，请检查被控端 Magisk 授权后重连。</string>
-    <string name="elevate_waiting">正在请求被控端 Root（请查看被控端 Magisk/su 授权弹窗）…</string>
+    <string name="elevate_root_ok">已获 Root，server 以 uid 0 启动；安全层（FLAG_SECURE）画面应可显示。</string>
+    <string name="elevate_su_denied">提权失败：Magisk 未授权或超时。安全层仍为黑屏。请在被控端允许 shell/ADB 后点重新连接。</string>
+    <string name="elevate_su_unavailable">未检测到可用 su（无 Root/Magisk）。安全层仍为黑屏；可用「解锁」盲输 PIN，或安装 Magisk 并开启 Root 提权。</string>
+    <string name="elevate_fallback">提权失败仍黑屏：未能以 uid 0 启动 server，已回退普通 shell。请检查被控端 Magisk 授权后重连。</string>
+    <string name="elevate_waiting">正在等待 Magisk 授权…</string>
     <string name="connecting">正在连接…</string>
     <string name="disconnected">已断开</string>
     <string name="session_error">会话错误：%1$s</string>

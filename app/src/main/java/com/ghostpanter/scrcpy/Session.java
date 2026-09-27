@@ -46,6 +46,9 @@ public final class Session {
         // After server bring-up: whether Root elevate succeeded. Used to
         // toast Magisk grant / FLAG_SECURE fallback clearly in Chinese.
         default void onElevateStatus(Server.ElevateStatus status) {}
+        // Fired only when su is pending Magisk grant (long wait). Not used
+        // when Magisk already allowed ADB shell (quick probe succeeds).
+        default void onElevateWaitingForGrant() {}
         // Fatal: a retry budget ran out, or the failure was not
         // retriable. Always followed by onStopped().
         void onError(Throwable t);
@@ -75,7 +78,7 @@ public final class Session {
             {1_000L, 2_000L, 5_000L, 10_000L, 15_000L};
     private static final long HEALTHY_MS = 120_000L;
 
-    private static final long BRING_UP_DEADLINE_MS = 90_000L;
+    private static final long BRING_UP_DEADLINE_MS = 120_000L;
     private static final long REDISCOVER_MS = 15_000L;
     private static final long STOP_JOIN_MS = 10_000L;
 
@@ -415,6 +418,9 @@ public final class Session {
         boolean installed = false;
         try {
             srv = new Server(ctx, adb);
+            srv.setOnWaitingForGrant(() -> {
+                if (listener != null) listener.onElevateWaitingForGrant();
+            });
             Server.Streams s = srv.bringUp();
             if (listener != null) listener.onElevateStatus(srv.elevateStatus());
 

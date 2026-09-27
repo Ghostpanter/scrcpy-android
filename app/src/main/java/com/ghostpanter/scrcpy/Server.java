@@ -44,7 +44,15 @@ public final class Server {
     private static final String ASSET_VERSION  = "scrcpy-server.version";
     private static final int    FILE_MODE      = 0100644;         // regular file, 0644
     private static final long   LISTENER_DEADLINE_MS = 20_000;
-    private static final long   LISTENER_RETRY_MS = 100;
+    // Elevated spawn may still be waiting on Magisk when we start accepting.
+    private static final long   LISTENER_DEADLINE_ELEVATED_MS = 70_000;
+    private static final long   LISTENER_RETRY_MS = 50;
+    // Already-granted Magisk/KernelSU returns uid 0 almost immediately.
+    private static final long   SU_QUICK_MS = 1_500L;
+    // Only used when the quick probe hangs (first grant / Magisk dialog).
+    private static final long   SU_PROMPT_MS = 60_000L;
+    // Elevated start banner: short when already granted, then extend to SU_PROMPT_MS.
+    private static final long   ELEVATE_UID_QUICK_MS = 2_000L;
     public static final class Streams {
         public final AdbStream    videoAds, audioAds, controlAds;
         public final InputStream  videoIn, audioIn, controlIn;
@@ -86,9 +94,22 @@ public final class Server {
     private volatile ElevateStatus elevateStatus = ElevateStatus.DISABLED;
     /** Which elevate wrapper succeeded in probe: "su0" or "su_c". */
     private String suForm;
+    /** Fired when we enter the long Magisk-grant wait (not on already-granted quick path). */
+    private volatile Runnable onWaitingForGrant;
 
     public ElevateStatus elevateStatus() {
         return elevateStatus;
+    }
+
+    public void setOnWaitingForGrant(Runnable r) {
+        onWaitingForGrant = r;
+    }
+
+    private void notifyWaitingForGrant() {
+        Runnable r = onWaitingForGrant;
+        if (r != null) {
+            try { r.run(); } catch (RuntimeException ignored) {}
+        }
     }
 
     public Streams bringUp() throws Exception {
@@ -121,7 +142,7 @@ public final class Server {
                 Log.i("spawn server (root) ver=%s scid=%s form=%s", version, scid, suForm);
                 Log.i("cmdline: %s", elevated);
                 try {
-                    Streams streams = spawnAndConnect(elevated, scid);
+                    Streams streams = spawnAndConnect(elevated, scid, /*expectRoot*/ true);
                     elevateStatus = ElevateStatus.ROOT;
                     return streams;
                 } catch (Exception e) {
@@ -143,25 +164,36 @@ public final class Server {
         String cmd = buildCmdline(version, scid);
         Log.i("spawn server ver=%s scid=%s", version, scid);
         Log.i("cmdline: %s", cmd);
-        return spawnAndConnect(cmd, scid);
+        return spawnAndConnect(cmd, scid, /*expectRoot*/ false);
     }
 
-    private Streams spawnAndConnect(String cmd, String scid) throws Exception {
+    private Streams spawnAndConnect(String cmd, String scid, boolean expectRoot) throws Exception {
         AdbStream va = null, aa = null, ca = null;
         boolean committed = false;
         try {
             shell = adb.openShell(cmd);
             AdbStream shellRef = shell;
-            shellPump = new Thread(() -> pump(shellRef.openInputStream()), "server-stdout");
+            InputStream shellIn = shellRef.openInputStream();
+            if (expectRoot) {
+                // Confirm the *start* path is uid 0 (not merely that probe worked).
+                // Magisk may prompt again on this second su; wait + surface UI.
+                int uid = awaitElevatedUid(shellIn);
+                if (uid != 0) {
+                    throw new IOException("elevated spawn not uid 0 (got " + uid + ")");
+                }
+                Log.i("server: elevated start confirmed uid=0 form=%s", suForm);
+            }
+            shellPump = new Thread(() -> pump(shellIn), "server-stdout");
             shellPump.setDaemon(true);
             shellPump.start();
 
             // These accepts are ordered. If one times out, the whole ADB
             // connection is discarded by Session; retrying an individual
             // open could shift video/audio/control onto the wrong sockets.
-            va = openAbstract(scid);
-            aa = openAbstract(scid);
-            ca = openAbstract(scid);
+            long acceptDeadline = expectRoot ? LISTENER_DEADLINE_ELEVATED_MS : LISTENER_DEADLINE_MS;
+            va = openAbstract(scid, acceptDeadline);
+            aa = openAbstract(scid, acceptDeadline);
+            ca = openAbstract(scid, acceptDeadline);
 
             InputStream  vi = va.openInputStream();
             InputStream  ai = aa.openInputStream();
@@ -185,8 +217,15 @@ public final class Server {
     // Magisk / KernelSU: `su 0` runs as uid 0; `su -c` is the portable form.
     // Prefer running a pushed script so Magisk sees a short request and we
     // avoid shell-quoting hazards on the long CLASSPATH/app_process line.
+    // The script echoes scrcpy-gp:uid=N and aborts unless N==0 so we never
+    // claim ROOT after merely probing, then falling back to a shell start.
     private String elevateCmd(String plain) throws Exception {
-        pushTextFile(REMOTE_START, "#!/system/bin/sh\n" + plain + "\n", SCRIPT_MODE);
+        String body = "#!/system/bin/sh\n"
+                + "uid=$(/system/bin/id -u 2>/dev/null || id -u)\n"
+                + "echo scrcpy-gp:uid=$uid\n"
+                + "[ \"$uid\" = \"0\" ] || exit 42\n"
+                + "exec " + plain + "\n";
+        pushTextFile(REMOTE_START, body, SCRIPT_MODE);
         if (suForm != null && suForm.startsWith("su_c")) {
             return "su -c " + shellSingleQuote("sh " + REMOTE_START);
         }
@@ -198,49 +237,67 @@ public final class Server {
         return "'" + s.replace("'", "'\''") + "'";
     }
 
-    private enum SuProbeResult { OK, UNAVAILABLE, DENIED }
-
-    // Wait long enough for Magisk/KernelSU to show the Superuser dialog on
-    // the TARGET and for the user to tap Allow. Closing early cancels the
-    // request (dialog never sticks / never appears). Magisk may also
-    // auto-grant ADB "shell" with only a toast — that still returns OK.
-    private static final long SU_PROMPT_MS = 60_000L;
+    private enum SuProbeResult { OK, UNAVAILABLE, DENIED, PENDING }
 
     private SuProbeResult probeSu() {
-        // Prefer Magisk-style `su 0`, then portable `su -c`.
-        // Stop on DENIED/timeout — a second 60s wait would only annoy the user
-        // after they already ignored/denied the Magisk dialog.
-        // Push a tiny probe script first so Magisk's Superuser UI gets a
-        // stable short path (some Magisk builds are flaky with long inline -c).
-        try {
-            pushTextFile(REMOTE_PROBE, "#!/system/bin/sh\nid -u\n", SCRIPT_MODE);
-        } catch (Exception e) {
-            Log.w("server: could not push su probe script: %s", e);
-        }
-        String[][] forms = {
-                {"su0_script", "su 0 sh " + REMOTE_PROBE},
-                {"su_c_script", "su -c " + shellSingleQuote("sh " + REMOTE_PROBE)},
+        // Fast path: inline `id -u` with a short timeout. When Magisk has
+        // already allowed ADB shell, this returns uid 0 in well under SU_QUICK_MS
+        // and we skip the 60s Magisk-dialog wait entirely.
+        String[][] quickForms = {
                 {"su0", "su 0 id -u"},
                 {"su_c", "su -c " + shellSingleQuote("id -u")},
         };
+        String pendingName = null;
+        String pendingCmd = null;
         SuProbeResult worst = SuProbeResult.UNAVAILABLE;
-        for (String[] form : forms) {
-            SuProbeResult r = probeSuOnce(form[0], form[1]);
+        for (String[] form : quickForms) {
+            SuProbeResult r = probeSuOnce(form[0], form[1], SU_QUICK_MS);
             if (r == SuProbeResult.OK) return SuProbeResult.OK;
             if (r == SuProbeResult.DENIED) return SuProbeResult.DENIED;
+            if (r == SuProbeResult.PENDING) {
+                // Magisk dialog likely showing — do not open a second su.
+                pendingName = form[0];
+                pendingCmd = form[1];
+                break;
+            }
             worst = r;
         }
-        return worst;
+        if (pendingName == null) return worst;
+
+        // su is present but the quick probe hung → first Magisk grant.
+        // One long wait only (do not stack 60s × N forms). Prefer a short
+        // pushed script so Magisk's Superuser UI shows a stable path.
+        notifyWaitingForGrant();
+        Log.i("server: su already-pending; long Magisk wait form=%s", pendingName);
+        try {
+            pushTextFile(REMOTE_PROBE, "#!/system/bin/sh\nid -u\n", SCRIPT_MODE);
+            String scriptName;
+            String scriptCmd;
+            if (pendingName.startsWith("su_c")) {
+                scriptName = "su_c_script";
+                scriptCmd = "su -c " + shellSingleQuote("sh " + REMOTE_PROBE);
+            } else {
+                scriptName = "su0_script";
+                scriptCmd = "su 0 sh " + REMOTE_PROBE;
+            }
+            SuProbeResult longR = probeSuOnce(scriptName, scriptCmd, SU_PROMPT_MS);
+            if (longR == SuProbeResult.PENDING) return SuProbeResult.DENIED;
+            return longR;
+        } catch (Exception e) {
+            Log.w("server: long su probe via script failed (%s); retrying inline", e);
+            SuProbeResult longR = probeSuOnce(pendingName, pendingCmd, SU_PROMPT_MS);
+            if (longR == SuProbeResult.PENDING) return SuProbeResult.DENIED;
+            return longR;
+        }
     }
 
-    private SuProbeResult probeSuOnce(String formName, String cmd) {
+    private SuProbeResult probeSuOnce(String formName, String cmd, long timeoutMs) {
         AdbStream s = null;
         Thread reader = null;
         final StringBuilder out = new StringBuilder();
         final long started = monotonicMs();
         try {
-            Log.i("server: su probe begin form=%s (wait up to %d ms for Magisk grant on target)",
-                    formName, SU_PROMPT_MS);
+            Log.i("server: su probe begin form=%s timeout=%d ms", formName, timeoutMs);
             s = adb.openShell(cmd);
             AdbStream ref = s;
             reader = new Thread(() -> {
@@ -259,7 +316,7 @@ public final class Server {
             }, "su-probe");
             reader.setDaemon(true);
             reader.start();
-            reader.join(SU_PROMPT_MS);
+            reader.join(timeoutMs);
             boolean timedOut = reader.isAlive();
             String textOut = out.toString().trim();
             boolean ok = looksLikeUid0(textOut);
@@ -276,9 +333,9 @@ public final class Server {
                 return SuProbeResult.DENIED;
             }
             if (timedOut) {
-                Log.i("server: su probe TIMEOUT form=%s (Magisk dialog not granted in time) raw=%s",
-                        formName, textOut);
-                return SuProbeResult.DENIED;
+                Log.i("server: su probe PENDING form=%s elapsed=%d ms (no uid yet) raw=%s",
+                        formName, elapsed, textOut);
+                return SuProbeResult.PENDING;
             }
             Log.i("server: su probe UNAVAILABLE form=%s elapsed=%d ms raw=%s",
                     formName, elapsed, textOut);
@@ -289,6 +346,101 @@ public final class Server {
         } finally {
             if (reader != null && reader.isAlive()) reader.interrupt();
             closeQuietly(s);
+        }
+    }
+
+    /** Read start-script banner `scrcpy-gp:uid=N` from the elevated shell stdout. */
+    private int awaitElevatedUid(InputStream in) throws Exception {
+        final StringBuilder out = new StringBuilder();
+        final Object lock = new Object();
+        final boolean[] done = {false};
+        Thread reader = new Thread(() -> {
+            try {
+                byte[] buf = new byte[128];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    synchronized (lock) {
+                        for (int i = 0; i < n; i++) {
+                            char c = (char) (buf[i] & 0xff);
+                            if (c >= 0x20 && c <= 0x7e) out.append(c);
+                            else if (c == '\n' || c == '\r') out.append(' ');
+                        }
+                        if (out.indexOf("scrcpy-gp:uid=") >= 0 || out.length() > 200) {
+                            done[0] = true;
+                            lock.notifyAll();
+                            return;
+                        }
+                    }
+                }
+            } catch (IOException ignored) {
+            } finally {
+                synchronized (lock) {
+                    done[0] = true;
+                    lock.notifyAll();
+                }
+            }
+        }, "elevate-uid");
+        reader.setDaemon(true);
+        reader.start();
+
+        long started = monotonicMs();
+        // Phase 1: already-granted Magisk returns the banner almost immediately.
+        synchronized (lock) {
+            while (!done[0] && monotonicMs() - started < ELEVATE_UID_QUICK_MS) {
+                long wait = ELEVATE_UID_QUICK_MS - (monotonicMs() - started);
+                if (wait <= 0) break;
+                try { lock.wait(wait); }
+                catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        boolean haveBanner;
+        synchronized (lock) {
+            haveBanner = out.indexOf("scrcpy-gp:uid=") >= 0;
+        }
+        // Phase 2: only if still pending — Magisk dialog on the *start* su.
+        if (!haveBanner && !done[0]) {
+            notifyWaitingForGrant();
+            Log.i("server: waiting for Magisk grant on elevated start (uid banner)");
+            synchronized (lock) {
+                while (!done[0] && monotonicMs() - started < SU_PROMPT_MS) {
+                    long wait = SU_PROMPT_MS - (monotonicMs() - started);
+                    if (wait <= 0) break;
+                    try { lock.wait(Math.min(wait, 1000L)); }
+                    catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Reader must leave before pump() uses the same InputStream.
+        if (!done[0]) reader.interrupt();
+        try { reader.join(500); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+        final String textOut;
+        synchronized (lock) { textOut = out.toString(); }
+        int idx = textOut.indexOf("scrcpy-gp:uid=");
+        if (idx < 0) {
+            Log.w("server: elevated uid banner missing after %d ms raw=%s",
+                    monotonicMs() - started, textOut.trim());
+            return -1;
+        }
+        int startUid = idx + "scrcpy-gp:uid=".length();
+        int endUid = startUid;
+        while (endUid < textOut.length() && Character.isDigit(textOut.charAt(endUid))) endUid++;
+        if (endUid == startUid) return -1;
+        try {
+            int uid = Integer.parseInt(textOut.substring(startUid, endUid));
+            Log.i("server: elevated uid banner uid=%d elapsed=%d ms",
+                    uid, monotonicMs() - started);
+            return uid;
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
@@ -419,9 +571,9 @@ public final class Server {
         return String.join(" ", args);
     }
 
-    private AdbStream openAbstract(String scid) throws Exception {
+    private AdbStream openAbstract(String scid, long deadlineMs) throws Exception {
         String name = "scrcpy_" + scid;
-        long deadline = monotonicMs() + LISTENER_DEADLINE_MS;
+        long deadline = monotonicMs() + deadlineMs;
         ConnectException last = null;
         while (monotonicMs() < deadline) {
             if (serverEof) {
@@ -440,7 +592,7 @@ public final class Server {
             }
         }
         throw new IOException("server did not open " + name + " within "
-                + LISTENER_DEADLINE_MS + " ms", last);
+                + deadlineMs + " ms", last);
     }
 
     private static String readDeviceMeta(InputStream in) throws IOException {

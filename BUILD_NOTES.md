@@ -62,7 +62,7 @@ the repo under `/workspace/secrets/`).
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
 | versionName | `0.5.9-ghostpanter` |
-| versionCode | `16` |
+| versionCode | `17` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -75,3 +75,10 @@ the repo under `/workspace/secrets/`).
   `com.ghostpanter.scrcpy` first, then install this release.
 - The broken unsigned v0.5.9 asset never installed, so most users only
   need a fresh install of the replaced asset.
+
+### Elevate / connect (vc17)
+
+- Quick su probe (~1.5s). If Magisk already granted ADB shell → skip 60s wait.
+- Long Magisk wait only when the quick probe hangs (first grant).
+- Elevated start script prints `scrcpy-gp:uid=0` and aborts unless root; UI toasts 已获 Root / 正在等待 Magisk 授权 / 提权失败仍黑屏.
+

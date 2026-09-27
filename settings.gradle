@@ -1,5 +1,9 @@
 pluginManagement {
     repositories {
+        // Aliyun mirrors first — dl.google.com is often unreachable from this build host.
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
+        maven { url = uri('https://maven.aliyun.com/repository/gradle-plugin') }
+        maven { url = uri('https://maven.aliyun.com/repository/public') }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -9,6 +13,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
+        maven { url = uri('https://maven.aliyun.com/repository/public') }
         google()
         mavenCentral()
         // JitPack is used only for libadb's SPAKE2 pairing bridge. Do not

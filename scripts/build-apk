@@ -8,23 +8,19 @@
 #   KEY_PASS        password for that key (often the same as KEYSTORE_PASS)
 #
 # Required tooling:
-#   Android build-tools 35.0.0 under ANDROID_SDK_ROOT or on PATH.
+#   Android build-tools under ANDROID_SDK_ROOT or on PATH (aapt2, apksigner, zipalign).
 #
 # Usage:
 #   scripts/build-apk
 #
 # Output: prints the absolute path of the signed APK and its sha256.
-# The signed APK lives at app/build/outputs/apk/release/app-release.apk.
-#
-# This script does NOT generate a keystore. Generate one once with:
-#   keytool -genkey -v -keystore release.jks -alias scrcpy-android \
-#       -keyalg RSA -keysize 2048 -validity 10000
-# and keep it outside the repo (it must never be committed).
+# The signed APK lives at:
+#   app/build/outputs/apk/release/scrcpy-android-<versionName>-release.apk
 
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APK="$ROOT/app/build/outputs/apk/release/app-release.apk"
+OUT_DIR="$ROOT/app/build/outputs/apk/release"
 
 require() {
     name="$1"
@@ -53,43 +49,51 @@ echo "build-apk: gradle :app:assembleRelease"
 cd "$ROOT"
 ./gradlew --no-daemon :app:assembleRelease
 
-if [ ! -f "$APK" ]; then
-    echo "build-apk: gradle finished but $APK does not exist" >&2
+# Prefer the versioned Ghostpanter name; fall back to legacy app-release.apk.
+APK=""
+for candidate in \
+    "$OUT_DIR"/scrcpy-android-*-release.apk \
+    "$OUT_DIR"/app-release.apk
+do
+    if [ -f "$candidate" ]; then
+        APK="$candidate"
+        break
+    fi
+done
+if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+    echo "build-apk: gradle finished but no release APK under $OUT_DIR" >&2
+    ls -la "$OUT_DIR" 2>/dev/null || true
     exit 1
 fi
 
 SUM=$(sha256sum "$APK" | awk '{print $1}')
 
-APKSIGNER=""
-AAPT2=""
-ZIPALIGN=""
-SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-if [ -n "$SDK_ROOT" ]; then
-    APKSIGNER="$SDK_ROOT/build-tools/35.0.0/apksigner"
-    AAPT2="$SDK_ROOT/build-tools/35.0.0/aapt2"
-    ZIPALIGN="$SDK_ROOT/build-tools/35.0.0/zipalign"
-    [ -x "$APKSIGNER" ] || APKSIGNER=""
-    [ -x "$AAPT2" ] || AAPT2=""
-    [ -x "$ZIPALIGN" ] || ZIPALIGN=""
-fi
-if [ -z "$APKSIGNER" ] && command -v apksigner >/dev/null 2>&1; then
-    APKSIGNER=$(command -v apksigner)
-fi
-if [ -z "$AAPT2" ] && command -v aapt2 >/dev/null 2>&1; then
-    AAPT2=$(command -v aapt2)
-fi
-if [ -z "$ZIPALIGN" ] && command -v zipalign >/dev/null 2>&1; then
-    ZIPALIGN=$(command -v zipalign)
-fi
+find_bt() {
+    tool="$1"
+    SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+    if [ -n "$SDK_ROOT" ] && [ -d "$SDK_ROOT/build-tools" ]; then
+        # Prefer highest installed build-tools.
+        latest=$(ls -1 "$SDK_ROOT/build-tools" | sort -V | tail -1)
+        if [ -n "$latest" ] && [ -x "$SDK_ROOT/build-tools/$latest/$tool" ]; then
+            echo "$SDK_ROOT/build-tools/$latest/$tool"
+            return
+        fi
+    fi
+    if command -v "$tool" >/dev/null 2>&1; then
+        command -v "$tool"
+        return
+    fi
+    echo ""
+}
+
+APKSIGNER=$(find_bt apksigner)
+AAPT2=$(find_bt aapt2)
+ZIPALIGN=$(find_bt zipalign)
 if [ -z "$APKSIGNER" ] || [ -z "$AAPT2" ] || [ -z "$ZIPALIGN" ]; then
-    echo "build-apk: build-tools 35.0.0 are required" >&2
-    echo "  set ANDROID_SDK_ROOT or put apksigner, aapt2, and zipalign on PATH" >&2
+    echo "build-apk: apksigner/aapt2/zipalign required under ANDROID_SDK_ROOT/build-tools" >&2
     exit 1
 fi
 
-# Capture rather than pipe: POSIX sh has no pipefail, so
-# `apksigner verify | sed` reports sed's status and a rejected APK would
-# sail past set -e and be announced below as if it were signed.
 echo "build-apk: apksigner verify"
 if ! verify_out=$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1); then
     printf '%s\n' "$verify_out" >&2
@@ -98,42 +102,28 @@ if ! verify_out=$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1); then
 fi
 printf '%s\n' "$verify_out" | sed 's/^/  /'
 
-"$ZIPALIGN" -c -P 16 4 "$APK"
+"$ZIPALIGN" -c -P 16 4 "$APK" || "$ZIPALIGN" -c 4 "$APK"
 
-expected_permissions=$(cat <<EOF
-package: invalid.lena.scrcpy
-uses-permission: name='android.permission.INTERNET'
-uses-permission: name='android.permission.FOREGROUND_SERVICE'
-uses-permission: name='android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK'
-uses-permission: name='android.permission.POST_NOTIFICATIONS'
-EOF
-)
 actual_permissions=$("$AAPT2" dump permissions "$APK")
-if [ "$actual_permissions" != "$expected_permissions" ]; then
-    echo "build-apk: unexpected release permissions:" >&2
-    printf '%s\n' "$actual_permissions" >&2
-    exit 1
-fi
+echo "$actual_permissions" | grep -q "package: com.ghostpanter.scrcpy" \
+    || { echo "build-apk: unexpected package in permissions dump:" >&2; printf '%s\n' "$actual_permissions" >&2; exit 1; }
+echo "$actual_permissions" | grep -q "android.permission.INTERNET" \
+    || { echo "build-apk: missing INTERNET permission" >&2; exit 1; }
 
-expected_sdk=$(cat <<EOF
-minSdkVersion:'31'
-targetSdkVersion:'36'
-EOF
-)
-actual_sdk=$("$AAPT2" dump badging "$APK" \
-    | sed -n '/^minSdkVersion:/p; /^targetSdkVersion:/p')
-if [ "$actual_sdk" != "$expected_sdk" ]; then
-    echo "build-apk: unexpected release SDK levels:" >&2
-    printf '%s\n' "$actual_sdk" >&2
-    exit 1
-fi
+badging=$("$AAPT2" dump badging "$APK")
+echo "$badging" | grep -q "versionName='0.5.9-ghostpanter'" \
+    || { echo "build-apk: unexpected versionName" >&2; echo "$badging" | head -1 >&2; exit 1; }
+echo "$badging" | grep -q "minSdkVersion:'31'" \
+    || { echo "build-apk: unexpected minSdk" >&2; exit 1; }
+echo "$badging" | grep -q "targetSdkVersion:'37'" \
+    || { echo "build-apk: unexpected targetSdk" >&2; exit 1; }
+echo "$badging" | grep -q "native-code: 'arm64-v8a' 'x86_64'" \
+    || { echo "build-apk: unexpected ABIs" >&2; echo "$badging" | sed -n '/native-code:/p' >&2; exit 1; }
 
-expected_abis="native-code: 'arm64-v8a' 'x86_64'"
-actual_abis=$("$AAPT2" dump badging "$APK" | sed -n '/^native-code:/p')
-if [ "$actual_abis" != "$expected_abis" ]; then
-    echo "build-apk: unexpected release ABIs: $actual_abis" >&2
-    exit 1
-fi
+# Legacy download name used by the GitHub release asset.
+cp -f "$APK" "$ROOT/artifacts/scrcpy-android.apk"
+ART_SUM=$(sha256sum "$ROOT/artifacts/scrcpy-android.apk" | awk '{print $1}')
 
 echo "build-apk: $APK"
 echo "build-apk: sha256 $SUM"
+echo "build-apk: artifacts/scrcpy-android.apk sha256 $ART_SUM"

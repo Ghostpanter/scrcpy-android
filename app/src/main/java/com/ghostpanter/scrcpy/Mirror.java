@@ -296,9 +296,8 @@ public final class Mirror extends Activity {
         state = State.CONNECTING;
         updateStatusBar();
         long generation = ++sessionGeneration;
-        if (Settings.rootCaptureSecure(this) && statusText != null) {
-            statusText.setText(getString(R.string.elevate_waiting));
-        }
+        // Do not show Magisk-waiting UI until the server reports a pending grant.
+        // Already-authorized devices skip the long wait and stay on「正在连接…」.
         session = new Session(this, adb, target, s, new Session.Listener() {
             @Override public void onConnected(long geometryVersion, int w, int h) {
                 runOnUiThread(() -> {
@@ -318,6 +317,15 @@ public final class Mirror extends Activity {
                     if (destroyed || generation != sessionGeneration) return;
                     state = State.CONNECTING;
                     updateStatusBar();
+                });
+            }
+            @Override public void onElevateWaitingForGrant() {
+                runOnUiThread(() -> {
+                    if (destroyed || generation != sessionGeneration) return;
+                    if (statusText != null && state == State.CONNECTING) {
+                        statusText.setText(getString(R.string.elevate_waiting));
+                    }
+                    Toast.makeText(Mirror.this, R.string.elevate_waiting, Toast.LENGTH_SHORT).show();
                 });
             }
             @Override public void onElevateStatus(Server.ElevateStatus status) {
