@@ -23,6 +23,7 @@ import com.genymobile.scrcpy.video.ScreenCapture;
 import com.genymobile.scrcpy.video.SurfaceCapture;
 import com.genymobile.scrcpy.video.SurfaceEncoder;
 import com.genymobile.scrcpy.video.VideoSource;
+import com.genymobile.scrcpy.wrappers.SurfaceControl;
 
 import android.annotation.SuppressLint;
 import android.os.Build;
@@ -277,24 +278,37 @@ public final class Server {
     }
 
     /**
-     * Keep real uid 0 when launched via su, but drop *effective* uid to shell
-     * (2000) for ordinary Binder calls (clipboard, settings, input).
-     * {@code setuid(2000)} would permanently lose root and make secure-display
-     * capture impossible on Android 12+. Use seteuid so ScreenCapture can
-     * temporarily restore euid 0 to create a FLAG_SECURE virtual display.
-     * Inspired by Genymobile/scrcpy#4947 (vvb2060).
+     * Drop root before mirroring.
+     * <p>
+     * On Android 16+ (or when SurfaceControl.createDisplay is gone), secure VD
+     * never works on many OEMs (packageName must match owner uid; no SC path).
+     * Restore stock scrcpy behaviour: permanent {@code setuid(2000)} so
+     * DisplayManager + AudioRecord see shell uid / {@code com.android.shell}.
+     * <p>
+     * On older devices, keep real uid 0 and only {@code seteuid(2000)} so
+     * ScreenCapture can temporarily restore euid 0 for FLAG_SECURE VD
+     * (Genymobile/scrcpy#4947).
      */
     @SuppressWarnings("deprecation")
     private static void dropRootPrivileges() {
         try {
-            if (Os.getuid() == 0) {
-                // Copy-paste does not work with root euid
-                // <https://github.com/Genymobile/scrcpy/issues/6224>
+            if (Os.getuid() != 0) {
+                return;
+            }
+            // Copy-paste does not work with root euid
+            // <https://github.com/Genymobile/scrcpy/issues/6224>
+            boolean android16Plus = Build.VERSION.SDK_INT >= 36
+                    || !SurfaceControl.hasCreateDisplayMethod();
+            if (android16Plus) {
+                Os.setuid(2000);
+                Ln.i("Android 16+: dropped to shell via setuid(2000); "
+                        + "secure VD needs LSPosed on some OEMs");
+            } else {
                 Os.seteuid(2000);
                 Ln.i("Root retained (ruid=0); euid dropped to shell for Binder");
             }
         } catch (Exception e) {
-            Ln.w("Cannot set EUID", e);
+            Ln.w("Cannot drop root privileges", e);
         }
     }
 }

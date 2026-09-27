@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.12-ghostpanter` |
-| versionCode | `23` |
+| versionName | `0.5.13-ghostpanter` |
+| versionCode | `24` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -106,6 +106,30 @@ required — not bundled. Blind unlock keypad remains as non-root fallback.
 before `assembleRelease`.
 
 
+
+### Connect / audio + A16 shell start (vc24 / 0.5.13)
+
+**Root cause (MI 9 HyperOS Android 16, 0.5.12):** Display path succeeded after
+`setuid(2000)` safety net, but `AudioRecord.startRecording()` threw
+`UnsupportedOperationException`. Only API 30 wrapped that as
+`AudioCaptureException`; on A16 the UOE escaped `AudioEncoder.start()`,
+`finally` called `onTerminated(false)`, then the default
+`UncaughtExceptionHandler` on `app_process` killed the whole server →
+control+video EOF → reconnect 1/5…5/5.
+
+**Fix:**
+1. `AudioDirectCapture.start()`: catch UOE on **all** API levels →
+   `AudioCaptureException` (soft retry once on non-30).
+2. `AudioEncoder.encode()`: capture failures use `writeDisableStream(false)`;
+   only config/encoder failures use `true`. Catch leftover `RuntimeException`
+   as soft disable.
+3. `AudioEncoder.start()` / `AudioRawRecorder.start()`: catch `Throwable`,
+   log, **never rethrow** after `onTerminated`; capture failures stay
+   `fatalError=false` so video+control survive.
+4. Android 16+: `Server.dropRootPrivileges()` uses stock `Os.setuid(2000)`
+   when `SDK_INT>=36` or SurfaceControl has no `createDisplay` (restore vc20
+   shell start). Older devices keep seteuid retain-ruid for secure VD.
+5. Client `AudioStream`: fourcc==1 soft-lands like disabled (no scary IOE).
 
 ### Connect / A16 HyperOS setuid fix (vc23 / 0.5.12)
 

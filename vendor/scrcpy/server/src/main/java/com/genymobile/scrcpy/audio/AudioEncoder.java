@@ -161,9 +161,15 @@ public final class AudioEncoder implements AsyncProcessor {
                 fatalError = true;
             } catch (AudioCaptureException e) {
                 // Do not print stack trace, a user-friendly error-message has already been logged
+                // Capture failure: disable audio only; never fatal to the session.
             } catch (IOException e) {
                 Ln.e("Audio encoding error", e);
                 fatalError = true;
+            } catch (Throwable t) {
+                // Catch RuntimeException/Error so the default UncaughtExceptionHandler
+                // (KillApplication on app_process) never tears down video+control.
+                Ln.e("Audio encoder unexpected error (audio disabled, session continues)", t);
+                // Keep fatalError=false — capture/init surprises must not end the server.
             } finally {
                 Ln.d("Audio encoder stopped");
                 listener.onTerminated(fatalError);
@@ -267,11 +273,23 @@ public final class AudioEncoder implements AsyncProcessor {
 
             waitEnded();
         } catch (AudioCaptureException e) {
-            // Notify the client that the audio could not be captured
+            // Notify the client that the audio could not be captured (soft disable)
             streamer.writeDisableStream(false);
             throw e;
-        } catch (Throwable e) {
-            // Notify the error to make scrcpy exit
+        } catch (ConfigurationException e) {
+            // True encoder/config failure — client fourcc==1
+            streamer.writeDisableStream(true);
+            throw e;
+        } catch (IOException e) {
+            // Encoder create / IO failure during init
+            streamer.writeDisableStream(true);
+            throw e;
+        } catch (RuntimeException e) {
+            // Leftover UOE / OEM surprises from capture: soft-disable, not fatal
+            Ln.e("Audio capture/init failed (disabling audio)", e);
+            streamer.writeDisableStream(false);
+            throw new AudioCaptureException();
+        } catch (Error e) {
             streamer.writeDisableStream(true);
             throw e;
         } finally {

@@ -122,7 +122,23 @@ public class AudioDirectCapture implements AudioCapture {
                 stopWorkaroundAndroid11();
             }
         } else {
-            startRecording();
+            // Android 12+ (incl. 16): AudioRecord.startRecording() may throw
+            // UnsupportedOperationException (e.g. AttributionSource / OEM policy).
+            // Must become AudioCaptureException so audio disables without killing
+            // the whole app_process (video+control stay up).
+            try {
+                startRecording();
+            } catch (UnsupportedOperationException e) {
+                Ln.e("Failed to start audio capture", e);
+                // One soft retry (mirrors API 30 path); still non-fatal on failure.
+                try {
+                    SystemClock.sleep(100);
+                    startRecording();
+                } catch (UnsupportedOperationException e2) {
+                    Ln.e("Failed to start audio capture after retry", e2);
+                    throw new AudioCaptureException();
+                }
+            }
         }
     }
 

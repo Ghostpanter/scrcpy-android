@@ -63,7 +63,10 @@ public final class AudioStream {
                 return;
             }
             if (fourcc == 1) {
-                throw new IOException("audio: server reports configuration error");
+                // Soft-land like fourcc==0: do not throw a scary IOException.
+                // Audio never countDowns session endSignal.
+                Log.w("audio: server reports stream error; continuing without audio");
+                return;
             }
             if (fourcc != Wire.CODEC_RAW && fourcc != Wire.CODEC_OPUS) {
                 throw new IOException("audio: unexpected codec " + Wire.fourccName(fourcc));
