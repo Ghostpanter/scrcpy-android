@@ -180,9 +180,9 @@ public final class DisplayManager {
      * FLAG_SECURE layers (lock screen, banking, encrypted gallery) requires
      * this flag plus a privileged caller (AID_SYSTEM / root).
      * <p>
-     * Caller should temporarily {@code seteuid(1000)} so Binder callingUid
-     * matches package {@code android}; uid 0 has no PackageManager package and
-     * fails {@code packageName must match the owner uid} on Android 14+.
+     * Caller should temporarily {@code setresuid(1000,1000,0)} so Binder
+     * callingUid (ruid on HyperOS) matches package {@code android}; seteuid
+     * alone is not enough when callingUid follows real uid.
      */
     @TargetApi(AndroidVersions.API_34_ANDROID_14)
     public VirtualDisplay createSecureMirrorVirtualDisplay(String name, int width, int height, int displayIdToMirror,
@@ -205,10 +205,20 @@ public final class DisplayManager {
                 android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
         ctor.setAccessible(true);
         android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+        int ruid;
+        int euid;
+        try {
+            ruid = android.system.Os.getuid();
+            euid = android.system.Os.geteuid();
+        } catch (Throwable t) {
+            ruid = -1;
+            euid = FakeContext.binderIdentityUid();
+        }
         Ln.i("DisplayManager SECURE create: flags=0x" + Integer.toHexString(flags)
                 + " mirrorId=" + displayIdToMirror
                 + " pkg=" + FakeContext.currentPackageName()
-                + " euid=" + FakeContext.binderIdentityUid());
+                + " ruid=" + ruid
+                + " euid=" + euid);
         return dm.createVirtualDisplay(builder.build());
     }
 

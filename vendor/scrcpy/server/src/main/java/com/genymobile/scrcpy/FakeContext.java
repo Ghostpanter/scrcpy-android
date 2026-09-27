@@ -44,25 +44,37 @@ public final class FakeContext extends ContextWrapper {
     }
 
     /**
-     * Binder / DisplayManager identity follows euid on Android. Prefer the
-     * effective uid so packageName validation matches:
+     * Identity for FakeContext package / AttributionSource.
+     * <p>
+     * On HyperOS A16, {@code Binder.getCallingUid()} follows <b>real</b> uid.
+     * ScreenCapture temporarily sets {@code ruid=euid=1000} via setresuid so
+     * both match AID_SYSTEM. Prefer ruid when it is SYSTEM/ROOT; else euid
+     * (shell drop keeps ruid=0 euid=2000 — still report shell package).
      * <ul>
-     *   <li>euid 1000 → package {@code android} (AID_SYSTEM owns it)</li>
-     *   <li>euid 0 → package {@code android} (often rejected: uid 0 owns no pkg)</li>
+     *   <li>ruid/euid 1000 → package {@code android}</li>
+     *   <li>euid 0 (root) → package {@code android}</li>
      *   <li>euid 2000 → {@code com.android.shell}</li>
      * </ul>
      */
     public static int binderIdentityUid() {
         try {
-            return Os.geteuid();
+            int ruid = Os.getuid();
+            int euid = Os.geteuid();
+            if (ruid == SYSTEM_UID || euid == SYSTEM_UID) {
+                return SYSTEM_UID;
+            }
+            if (euid == ROOT_UID) {
+                return ROOT_UID;
+            }
+            return euid;
         } catch (Throwable ignored) {
             return Process.myUid();
         }
     }
 
     public static String currentPackageName() {
-        int euid = binderIdentityUid();
-        if (euid == SYSTEM_UID || euid == ROOT_UID) {
+        int uid = binderIdentityUid();
+        if (uid == SYSTEM_UID || uid == ROOT_UID) {
             return ROOT_PACKAGE_NAME;
         }
         return PACKAGE_NAME;

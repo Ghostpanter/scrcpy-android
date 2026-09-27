@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.14-ghostpanter` |
-| versionCode | `25` |
+| versionName | `0.5.15-ghostpanter` |
+| versionCode | `26` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -108,6 +108,30 @@ before `assembleRelease`.
 
 
 
+
+
+
+### Secure capture / setresuid AID_SYSTEM (vc26 / 0.5.15)
+
+**Root cause (MI 9 HyperOS Android 16, 0.5.14):** `seteuid(1000)` alone is not
+enough. On this OEM, `Binder.getCallingUid()` follows **real uid** (ruid=0), while
+package `android` is owned by **uid 1000**. DisplayManager rejects with
+`packageName must match the owner uid` for both euid=1000 and euid=0 + pkg=android.
+Secure VD create never succeeded — hence black secure pages.
+
+**Fix:**
+1. Before SECURE create: from root, `setresuid(1000,1000,0)` (libcore) or
+   setreuid dance so **ruid=euid=1000**, keep **saved uid 0** for restore.
+2. FakeContext reports package `android` / AttributionSource for 1000.
+3. Create `PUBLIC|AUTO_MIRROR|SECURE` virtual display.
+4. On success: restore via saved uid (`setresuid(0,0,0)` + previous euid); do
+   **not** permanently `setuid(2000)`.
+5. On failure: restore root, then existing `setuid(2000)` safety net (0.5.13/14).
+6. Also probe root callingUid with package `android` / `com.android.shell`.
+7. Audio soft-fail from 0.5.13 retained.
+
+**Log markers:** `secure capture enabled (ruid=euid=1000)` vs
+`falling back to setuid(2000)`. If create succeeds but layers still black → LSPosed.
 
 ### Secure capture / AID_SYSTEM on A16 (vc25 / 0.5.14)
 

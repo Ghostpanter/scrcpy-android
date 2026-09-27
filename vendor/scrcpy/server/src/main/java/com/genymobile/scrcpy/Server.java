@@ -280,9 +280,10 @@ public final class Server {
      * Drop root before mirroring — keep real uid 0, only {@code seteuid(2000)}.
      * <p>
      * Copy-paste breaks with root euid (Genymobile/scrcpy#6224). ScreenCapture
-     * temporarily raises euid to {@code AID_SYSTEM} (1000) or 0 to create a
-     * FLAG_SECURE virtual display, then falls back to permanent
-     * {@code setuid(2000)} if every privileged create fails (HyperOS A16
+     * temporarily {@code setresuid(1000,1000,0)} so Binder callingUid matches
+     * package {@code android} (AID_SYSTEM), creates a FLAG_SECURE virtual
+     * display, restores via saved-uid 0, then falls back to permanent
+     * {@code setuid(2000)} only if every privileged create fails (HyperOS A16
      * safety net). Permanent early setuid(2000) on A16 was abandoned because
      * it made secure layers impossible to even try.
      */
@@ -296,7 +297,7 @@ public final class Server {
             // <https://github.com/Genymobile/scrcpy/issues/6224>
             Os.seteuid(2000);
             Ln.i("Root retained (ruid=0); euid dropped to shell for Binder; "
-                    + "secure VD will try AID_SYSTEM then fall back to setuid(2000)");
+                    + "secure VD will try setresuid(AID_SYSTEM) then fall back to setuid(2000)");
         } catch (Exception e) {
             Ln.w("Cannot drop root privileges", e);
         }
