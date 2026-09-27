@@ -10,12 +10,16 @@ import com.genymobile.scrcpy.util.Ln;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.os.IBinder;
+import android.content.AttributionSource;
+import android.content.pm.ApplicationInfo;
 import android.hardware.display.VirtualDisplay;
 import android.hardware.display.VirtualDisplayConfig;
 import android.os.Handler;
 import android.view.Display;
 import android.view.Surface;
 
+import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -201,10 +205,9 @@ public final class DisplayManager {
         // @SystemApi — present on Android 12+ framework, missing from public SDK stubs
         Method setMirror = builder.getClass().getMethod("setDisplayIdToMirror", int.class);
         setMirror.invoke(builder, displayIdToMirror);
-        Constructor<android.hardware.display.DisplayManager> ctor =
-                android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
-        ctor.setAccessible(true);
-        android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+        VirtualDisplayConfig config = builder.build();
+        String pkg = FakeContext.currentPackageName();
+        int ownerUid = FakeContext.ownerUidForPackage();
         int ruid;
         int euid;
         try {
@@ -214,12 +217,205 @@ public final class DisplayManager {
             ruid = -1;
             euid = FakeContext.binderIdentityUid();
         }
+        int attrUid = -1;
+        String attrPkg = "?";
+        try {
+            AttributionSource as = FakeContext.get().getAttributionSource();
+            attrUid = as.getUid();
+            attrPkg = as.getPackageName();
+        } catch (Throwable ignored) {
+            // API < 31 or stub
+        }
+        int appInfoUid = -1;
+        try {
+            ApplicationInfo ai = FakeContext.get().getApplicationInfo();
+            if (ai != null) {
+                appInfoUid = ai.uid;
+            }
+        } catch (Throwable ignored) {
+            // ignore
+        }
         Ln.i("DisplayManager SECURE create: flags=0x" + Integer.toHexString(flags)
                 + " mirrorId=" + displayIdToMirror
-                + " pkg=" + FakeContext.currentPackageName()
+                + " pkg=" + pkg
+                + " ownerUid=" + ownerUid
                 + " ruid=" + ruid
-                + " euid=" + euid);
-        return dm.createVirtualDisplay(builder.build());
+                + " euid=" + euid
+                + " attrUid=" + attrUid
+                + " attrPkg=" + attrPkg
+                + " appInfoUid=" + appInfoUid);
+
+        // Prefer explicit packageName on IDisplayManager (matches DMS validatePackageName).
+        // Some OEM paths may also take ownerUid — try both overloads via reflection.
+        try {
+            return createSecureViaDisplayManagerGlobal(config, pkg, ownerUid);
+        } catch (Exception explicit) {
+            Ln.d("DisplayManagerGlobal explicit packageName failed: " + explicit.getMessage());
+            Constructor<android.hardware.display.DisplayManager> ctor =
+                    android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
+            ctor.setAccessible(true);
+            android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+            try {
+                return dm.createVirtualDisplay(config);
+            } catch (Exception e) {
+                // Prefer the explicit-path exception if it was the OEM package check.
+                if (isPackageOwnerUidException(explicit) && !isPackageOwnerUidException(e)) {
+                    throw explicit;
+                }
+                throw e;
+            }
+        }
+    }
+
+    private static boolean isPackageOwnerUidException(Throwable t) {
+        while (t != null) {
+            String msg = t.getMessage();
+            if (msg != null && msg.contains("packageName must match")) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * Call {@code DisplayManagerGlobal.createVirtualDisplay(Context, MediaProjection,
+     * VirtualDisplayConfig, ...)} normally, but also try IDisplayManager binder
+     * overloads that take an explicit packageName / ownerUid (HyperOS).
+     */
+    private VirtualDisplay createSecureViaDisplayManagerGlobal(VirtualDisplayConfig config,
+            String packageName, int ownerUid) throws Exception {
+        // Path 1: public DisplayManager(Context) → uses FakeContext.getPackageName()
+        Constructor<android.hardware.display.DisplayManager> ctor =
+                android.hardware.display.DisplayManager.class.getDeclaredConstructor(Context.class);
+        ctor.setAccessible(true);
+        android.hardware.display.DisplayManager dm = ctor.newInstance(FakeContext.get());
+
+        // Path 2 (preferred when present): invoke IDisplayManager.createVirtualDisplay
+        // with explicit packageName so OEM owner-uid checks see the intended package
+        // even if ContextWrapper plumbing is wrong.
+        try {
+            Object dmg = manager; // DisplayManagerGlobal
+            Object iDm = null;
+            for (String fieldName : new String[] {"mDm", "mDisplayManager"}) {
+                try {
+                    Field f = dmg.getClass().getDeclaredField(fieldName);
+                    f.setAccessible(true);
+                    iDm = f.get(dmg);
+                    if (iDm != null) {
+                        break;
+                    }
+                } catch (NoSuchFieldException ignored) {
+                    // try next
+                }
+            }
+            if (iDm != null) {
+                Class<?> callbackClass = Class.forName("android.hardware.display.IVirtualDisplayCallback");
+                // Build a no-op callback via DisplayManagerGlobal helper if possible
+                VirtualDisplay result = tryIDisplayManagerCreate(iDm, callbackClass, config, packageName, ownerUid);
+                if (result != null) {
+                    return result;
+                }
+            }
+        } catch (Exception binderPath) {
+            Ln.d("IDisplayManager explicit create skipped: " + binderPath.getMessage());
+        }
+
+        return dm.createVirtualDisplay(config);
+    }
+
+    private VirtualDisplay tryIDisplayManagerCreate(Object iDm, Class<?> callbackClass,
+            VirtualDisplayConfig config, String packageName, int ownerUid) throws Exception {
+        // Obtain DisplayManagerGlobal.createVirtualDisplayWrapper for the displayId
+        Method wrap = null;
+        for (Method m : manager.getClass().getDeclaredMethods()) {
+            if ("createVirtualDisplayWrapper".equals(m.getName())) {
+                wrap = m;
+                wrap.setAccessible(true);
+                break;
+            }
+        }
+        // Create callback through DisplayManagerGlobal.createVirtualDisplay path:
+        // easiest reliable approach — still call dm.createVirtualDisplay after ensuring
+        // FakeContext package matches. Direct IDisplayManager needs a Stub callback.
+        // Instead: use DisplayManagerGlobal.createVirtualDisplay(Context,...) reflective
+        // overload if it accepts packageName explicitly (some OEM forks).
+        for (Method m : manager.getClass().getDeclaredMethods()) {
+            if (!"createVirtualDisplay".equals(m.getName())) {
+                continue;
+            }
+            Class<?>[] pts = m.getParameterTypes();
+            // (Context, MediaProjection, VirtualDisplayConfig, Callback, Executor)
+            // OEM: may add String packageName and/or int ownerUid
+            if (pts.length >= 5 && pts[0] == Context.class && pts[2] == VirtualDisplayConfig.class) {
+                m.setAccessible(true);
+                Object[] args = new Object[pts.length];
+                args[0] = FakeContext.get();
+                args[1] = null; // projection
+                args[2] = config;
+                args[3] = null; // callback
+                args[4] = null; // executor
+                for (int i = 5; i < pts.length; i++) {
+                    if (pts[i] == String.class) {
+                        args[i] = packageName;
+                    } else if (pts[i] == int.class || pts[i] == Integer.class) {
+                        args[i] = ownerUid;
+                    } else {
+                        args[i] = null;
+                    }
+                }
+                Ln.i("DisplayManager SECURE via DMG reflective arity=" + pts.length
+                        + " pkg=" + packageName + " ownerUid=" + ownerUid);
+                return (VirtualDisplay) m.invoke(manager, args);
+            }
+        }
+
+        // Fallback: IDisplayManager.createVirtualDisplay(config, callback, projection, packageName)
+        // and optional ownerUid — need a callback Stub. Skip if we cannot construct one.
+        for (Method m : iDm.getClass().getMethods()) {
+            if (!"createVirtualDisplay".equals(m.getName())) {
+                continue;
+            }
+            Class<?>[] pts = m.getParameterTypes();
+            if (pts.length < 4 || pts[0] != VirtualDisplayConfig.class) {
+                continue;
+            }
+            // Need IVirtualDisplayCallback — use java.lang.reflect.Proxy
+            Object callback = java.lang.reflect.Proxy.newProxyInstance(
+                    callbackClass.getClassLoader(),
+                    new Class<?>[] {callbackClass},
+                    (proxy, method, args) -> {
+                        if ("asBinder".equals(method.getName())) {
+                            return new android.os.Binder();
+                        }
+                        return null;
+                    });
+            Object[] args = new Object[pts.length];
+            args[0] = config;
+            args[1] = callback;
+            args[2] = null; // IMediaProjection
+            for (int i = 3; i < pts.length; i++) {
+                if (pts[i] == String.class) {
+                    args[i] = packageName;
+                } else if (pts[i] == int.class || pts[i] == Integer.class) {
+                    args[i] = ownerUid;
+                } else {
+                    args[i] = null;
+                }
+            }
+            Ln.i("DisplayManager SECURE via IDisplayManager arity=" + pts.length
+                    + " pkg=" + packageName + " ownerUid=" + ownerUid);
+            int displayId = (Integer) m.invoke(iDm, args);
+            if (displayId < 0) {
+                throw new IOException("IDisplayManager.createVirtualDisplay returned " + displayId);
+            }
+            if (wrap != null) {
+                return (VirtualDisplay) wrap.invoke(manager, config, callback, displayId);
+            }
+            // Without wrapper, fall through to Context path
+            Ln.d("createVirtualDisplayWrapper missing; displayId=" + displayId);
+        }
+        return null;
     }
 
     /** Compatibility overload (density defaults to 160). */

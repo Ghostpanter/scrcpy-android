@@ -49,6 +49,8 @@ public final class Session {
         // Fired only when su is pending Magisk grant (long wait). Not used
         // when Magisk already allowed ADB shell (quick probe succeeds).
         default void onElevateWaitingForGrant() {}
+        /** DisplayManager rejected SECURE VD on this OEM — show LSPosed tip. */
+        default void onSecureOemRejected() {}
         // Fatal: a retry budget ran out, or the failure was not
         // retriable. Always followed by onStopped().
         void onError(Throwable t);
@@ -420,6 +422,9 @@ public final class Session {
             srv = new Server(ctx, adb);
             srv.setOnWaitingForGrant(() -> {
                 if (listener != null) listener.onElevateWaitingForGrant();
+            });
+            srv.setOnSecureOemRejected(() -> {
+                if (listener != null) listener.onSecureOemRejected();
             });
             Server.Streams s = srv.bringUp();
             if (listener != null) listener.onElevateStatus(srv.elevateStatus());

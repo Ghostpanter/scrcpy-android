@@ -88,14 +88,20 @@ public final class Server {
     public enum ElevateStatus {
         /** Settings toggle off — shell spawn only. */
         DISABLED,
-        /** scrcpy-server launched as uid 0. */
+        /** scrcpy-server launched as uid 0 or AID_SYSTEM (1000). */
         ROOT,
         /** No working su on the target (or binary missing). */
         UNAVAILABLE,
         /** Magisk/KernelSU prompt timed out or denied. */
         DENIED,
         /** su worked in probe but elevated spawn failed; fell back to shell. */
-        FALLBACK
+        FALLBACK,
+        /**
+         * Root/system identity worked but DisplayManager rejected SECURE VD
+         * (packageName must match the owner uid). HyperOS A16 needs LSPosed
+         * + Disable FLAG_SECURE — Magisk alone is not enough.
+         */
+        SECURE_OEM_REJECTED
     }
 
     private volatile ElevateStatus elevateStatus = ElevateStatus.DISABLED;
@@ -107,6 +113,8 @@ public final class Server {
     private volatile String lastElevateStdout = "";
     /** Fired when we enter the long Magisk-grant wait (not on already-granted quick path). */
     private volatile Runnable onWaitingForGrant;
+    /** Fired when server logs SECURE_VD_OEM_REJECT (may be after elevateStatus=ROOT). */
+    private volatile Runnable onSecureOemRejected;
 
     public ElevateStatus elevateStatus() {
         return elevateStatus;
@@ -118,6 +126,18 @@ public final class Server {
 
     public void setOnWaitingForGrant(Runnable r) {
         onWaitingForGrant = r;
+    }
+
+    public void setOnSecureOemRejected(Runnable r) {
+        onSecureOemRejected = r;
+    }
+
+    private void notifySecureOemRejected() {
+        elevateStatus = ElevateStatus.SECURE_OEM_REJECTED;
+        Runnable r = onSecureOemRejected;
+        if (r != null) {
+            try { r.run(); } catch (RuntimeException ignored) {}
+        }
     }
 
     private void notifyWaitingForGrant() {
@@ -255,7 +275,8 @@ public final class Server {
                 + "sync\n"
                 + "/system/bin/sh -c \"printf 'scrcpy-gp:uid=%s\\n' \\\"$uid\\\"\"\n"
                 + "printf 'scrcpy-gp:uid=%s\\n' \"$uid\" >&2\n"
-                + "[ \"$uid\" = \"0\" ] || exit 42\n"
+                + "# Accept root (0) or AID_SYSTEM (1000) birth identity\n"
+                + "[ \"$uid\" = \"0\" ] || [ \"$uid\" = \"1000\" ] || exit 42\n"
                 + "JAR=\"\"\n"
                 + "for c in \"$JAR_SRC\" \"$JAR_ADB\" \"$JAR_DEV\"; do\n"
                 + "  if [ -r \"$c\" ]; then JAR=$c; break; fi\n"
@@ -315,6 +336,13 @@ public final class Server {
                 "/system/bin/su -c " + q, null));
         add.accept(new ElevateRecipe("debug_ramdisk_su_c",
                 "/debug_ramdisk/su -c " + q, null));
+        // Birth as AID_SYSTEM: Binder callingUid is 1000 from process start (no mid-flight
+        // setresuid). Magisk: su 1000 -c … ; some builds need su -c 'su 1000 …'.
+        add.accept(new ElevateRecipe("su1000_c", "su 1000 -c " + q, null));
+        add.accept(new ElevateRecipe("su_c_su1000",
+                "su -c " + shellSingleQuote("su 1000 sh " + REMOTE_START), null));
+        add.accept(new ElevateRecipe("su0_c_su1000",
+                "su 0 -c " + shellSingleQuote("su 1000 sh " + REMOTE_START), null));
         add.accept(new ElevateRecipe("su_stdin", "su", shStart + "\n"));
         // Last resort: enter init mount ns only after copying jar inside script.
         String ns = shellSingleQuote(
@@ -386,11 +414,11 @@ public final class Server {
             }
             InputStream shellIn = shellRef.openInputStream();
             int uid = awaitElevatedUid(shellIn, recipe.name, uidWaitMs);
-            if (uid != 0) {
-                throw new IOException("elevated spawn not uid 0 (got " + uid
+            if (uid != 0 && uid != 1000) {
+                throw new IOException("elevated spawn not uid 0/1000 (got " + uid
                         + ") recipe=" + recipe.name);
             }
-            Log.i("server: elevated start confirmed uid=0 recipe=%s", recipe.name);
+            Log.i("server: elevated start confirmed uid=%d recipe=%s", uid, recipe.name);
             if (isElevateScriptStructuralFailure(lastElevateStdout)) {
                 throw new IOException("elevated script structural failure after uid0"
                         + " recipe=" + recipe.name + ": " + lastElevateStdout.trim());
@@ -923,7 +951,13 @@ public final class Server {
             while ((n = source.read(bytes)) >= 0) {
                 if (n == 0) throw new IOException("server stdout made no progress");
                 String chunk = safeLogBytes(bytes, n).trim();
-                if (!chunk.isEmpty()) Log.i("server: %s", chunk);
+                if (!chunk.isEmpty()) {
+                    Log.i("server: %s", chunk);
+                    if (chunk.contains("SECURE_VD_OEM_REJECT")
+                            && elevateStatus != ElevateStatus.SECURE_OEM_REJECTED) {
+                        notifySecureOemRejected();
+                    }
+                }
             }
         } catch (IOException e) {
             if (!Thread.currentThread().isInterrupted()) Log.w("server-stdout closed: %s", e);

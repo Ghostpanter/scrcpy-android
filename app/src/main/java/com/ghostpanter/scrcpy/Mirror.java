@@ -335,6 +335,12 @@ public final class Mirror extends Activity {
                     showElevateStatus(status);
                 });
             }
+            @Override public void onSecureOemRejected() {
+                runOnUiThread(() -> {
+                    if (destroyed || generation != sessionGeneration) return;
+                    showElevateStatus(Server.ElevateStatus.SECURE_OEM_REJECTED);
+                });
+            }
             @Override public void onError(Throwable t) {
                 runOnUiThread(() -> {
                     if (destroyed || generation != sessionGeneration) return;
@@ -379,6 +385,10 @@ public final class Mirror extends Activity {
                 res = R.string.elevate_fallback;
                 offerLogs = true;
                 break;
+            case SECURE_OEM_REJECTED:
+                res = R.string.elevate_secure_oem_rejected;
+                offerLogs = true;
+                break;
             default:
                 return;
         }
@@ -386,8 +396,10 @@ public final class Mirror extends Activity {
         // Long toast still truncates on many OEMs — also show a dialog with
         // an explicit「查看日志」action so the ring-buffer transcript is reachable.
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-        if (statusText != null && state == State.CONNECTING
-                && status != Server.ElevateStatus.ROOT) {
+        if (statusText != null
+                && status != Server.ElevateStatus.ROOT
+                && (state == State.CONNECTING
+                    || status == Server.ElevateStatus.SECURE_OEM_REJECTED)) {
             statusText.setText(msg);
             if (offerLogs) {
                 statusText.setOnClickListener(v -> openLogViewer());

@@ -47,10 +47,11 @@
     <string name="bit_rate_16m">16 Mbps</string>
     <string name="reconnect">Reconnect</string>
     <string name="disconnect">Disconnect</string>
-    <string name="elevate_root_ok">Root granted — server started as ruid=0; will setresuid to AID_SYSTEM (ruid=euid=1000) for a secure virtual display (lock/secure pages), then fall back to normal mirroring without dropping the connection. If create succeeds but secure layers stay black, some HyperOS/Android 16 builds may still need LSPosed+Disable FLAG_SECURE.</string>
+    <string name="elevate_root_ok">Server started with root/system identity; will try AID_SYSTEM for a secure virtual display. If DisplayManager still rejects it (common on HyperOS), you will see an LSPosed tip. Normal mirroring is unaffected.</string>
     <string name="elevate_su_denied">Elevate failed: Magisk denied or timed out. Secure apps stay black. Allow shell/ADB on the target, then Reconnect.</string>
     <string name="elevate_su_unavailable">No working su (no Root/Magisk). Secure apps stay black; use Unlock for blind PIN, or install Magisk and enable Root elevate.</string>
     <string name="elevate_fallback">Elevate failed (still black): could not start server as uid 0; fell back to shell. Open Settings → Logs for the full probe/start transcript; confirm Magisk allowed Shell, then reconnect.</string>
+    <string name="elevate_secure_oem_rejected">Root/system identity is available and normal mirroring works, but this HyperOS/Android 16 DisplayManager rejected the secure virtual display (packageName must match the owner uid). Magisk alone cannot unlock FLAG_SECURE black screens — install LSPosed + Disable FLAG_SECURE (or equivalent; not bundled). Blind PIN unlock remains available.</string>
     
     <string name="log_viewer_title">Logs</string>
     <string name="log_viewer_caption">Full elevate / ADB / su / server output (toasts truncate). Filter by level, copy or share.</string>
@@ -177,13 +178,13 @@
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">Secure content / Root / Shizuku</string>
     <string name="secure_content_nonroot">Non-root: use Unlock on the mirror for blind PIN/password; unlock patterns on the phone first. On Android 12+ lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
-    <string name="secure_content_root">Root (preferred): with “Elevate server for secure layers (su)” on, if the target has working su we start the patched server as ruid=0 and setresuid to AID_SYSTEM (ruid=euid=1000) for a VIRTUAL_DISPLAY_FLAG_SECURE mirror; on failure we fall back to shell so normal mirroring still works. Normal mirroring works without LSPosed. If the secure VD is created but lock/encrypted gallery stay black, use Magisk+LSPosed+Disable FLAG_SECURE (not bundled).</string>
+    <string name="secure_content_root">Root (preferred): Magisk su starts the patched server (uid 0, or try uid 1000) and creates a VIRTUAL_DISPLAY_FLAG_SECURE mirror as AID_SYSTEM. Failure falls back to normal mirroring. If logs show packageName must match the owner uid, this HyperOS build rejected the secure VD — install Magisk+LSPosed+Disable FLAG_SECURE (not bundled); Magisk alone is not enough.</string>
 
     <string name="secure_content_shizuku">Shizuku (local shell): authorize Shizuku on this controller for local shell helpers. Shizuku is only shell uid — it does not replace Root on the target. Android 12+ FLAG_SECURE lock/gallery on the target still need Root elevate there. Wireless ADB always remains available.</string>
 
     <string name="root_capture_secure">Elevate server for secure layers (su)</string>
 
-    <string name="root_capture_secure_help">On by default. On connect we request su on the target (Magisk may prompt, or auto-grant ADB shell). Success keeps ruid=0 and setresuid to AID_SYSTEM (ruid=euid=1000) for a secure virtual display for FLAG_SECURE; failure falls back to shell without breaking normal mirroring. If the VD is created but HyperOS/Android 16 lock/secure pages stay black, install Magisk+LSPosed+Disable FLAG_SECURE separately (not bundled).</string>
+    <string name="root_capture_secure_help">On by default. Requests su on connect; tries a secure virtual display as root or AID_SYSTEM. On HyperOS/Android 16, if DisplayManager still throws packageName must match the owner uid, secure layers stay black — use LSPosed+Disable FLAG_SECURE (not bundled). Normal mirroring still works.</string>
 
     <string name="prefer_shizuku">Enable Shizuku (this device)</string>
 

@@ -84,8 +84,9 @@ public final class Workarounds {
             Object appBindData = appBindDataConstructor.newInstance();
 
             ApplicationInfo applicationInfo = new ApplicationInfo();
-            // Match calling uid: "android" when ruid=0, else com.android.shell
+            // Match Binder / OEM owner-uid checks: package + ApplicationInfo.uid
             applicationInfo.packageName = FakeContext.currentPackageName();
+            applicationInfo.uid = FakeContext.ownerUidForPackage();
 
             // appBindData.appInfo = applicationInfo;
             Field appInfoField = appBindDataClass.getDeclaredField("appInfo");
@@ -103,11 +104,13 @@ public final class Workarounds {
     }
 
     /**
-     * Keep ActivityThread AppBindData.appInfo.packageName in sync after a
-     * permanent setuid drop (or other identity change) so DisplayManager's
-     * packageName-vs-uid check still passes.
+     * Keep FakeContext override + ActivityThread AppBindData.appInfo in sync
+     * after an identity change so DisplayManager's packageName-vs-uid (and
+     * HyperOS owner-uid) checks still see a coherent package + uid.
      */
     public static void updateFakePackageName(String packageName) {
+        FakeContext.setPackageOverride(packageName);
+        int ownerUid = FakeContext.ownerUidForPackage();
         try {
             Field mBoundApplicationField = ACTIVITY_THREAD_CLASS.getDeclaredField("mBoundApplication");
             mBoundApplicationField.setAccessible(true);
@@ -120,9 +123,39 @@ public final class Workarounds {
             ApplicationInfo applicationInfo = (ApplicationInfo) appInfoField.get(appBindData);
             if (applicationInfo != null) {
                 applicationInfo.packageName = packageName;
+                applicationInfo.uid = ownerUid;
             }
+            Ln.d("Workarounds: fake identity pkg=" + packageName + " uid=" + ownerUid);
         } catch (Throwable throwable) {
             Ln.d("Could not update fake package name: " + throwable.getMessage());
+        }
+    }
+
+    /** Clear package override (resume uid-derived FakeContext defaults). */
+    public static void clearFakePackageOverride() {
+        FakeContext.setPackageOverride(null);
+    }
+
+    /** Push current FakeContext package/uid into ActivityThread AppBindData without setting an override. */
+    public static void syncApplicationInfoFromFakeContext() {
+        String packageName = FakeContext.currentPackageName();
+        int ownerUid = FakeContext.ownerUidForPackage();
+        try {
+            Field mBoundApplicationField = ACTIVITY_THREAD_CLASS.getDeclaredField("mBoundApplication");
+            mBoundApplicationField.setAccessible(true);
+            Object appBindData = mBoundApplicationField.get(ACTIVITY_THREAD);
+            if (appBindData == null) {
+                return;
+            }
+            Field appInfoField = appBindData.getClass().getDeclaredField("appInfo");
+            appInfoField.setAccessible(true);
+            ApplicationInfo applicationInfo = (ApplicationInfo) appInfoField.get(appBindData);
+            if (applicationInfo != null) {
+                applicationInfo.packageName = packageName;
+                applicationInfo.uid = ownerUid;
+            }
+        } catch (Throwable throwable) {
+            Ln.d("Could not sync ApplicationInfo: " + throwable.getMessage());
         }
     }
 

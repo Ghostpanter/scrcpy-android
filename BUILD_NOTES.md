@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.15-ghostpanter` |
-| versionCode | `26` |
+| versionName | `0.5.16-ghostpanter` |
+| versionCode | `27` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -110,6 +110,38 @@ before `assembleRelease`.
 
 
 
+
+### Secure capture / package override + OEM reject UI (vc27 / 0.5.16)
+
+**Root cause (MI 9 HyperOS Android 16, 0.5.15 logs):** `setresuid(1000,1000,0)`
+did change process ruid/euid to 1000 and FakeContext reported `pkg=android`, but
+DisplayManagerService still threw `packageName must match the owner uid` (OEM
+wording; AOSP Android 16 still says "calling uid"). Separately, the
+`runAsRootWithPackage(com.android.shell)` probe was broken: FakeContext always
+derived package from uid, so ruid=0 still logged/used `android`.
+
+**AOSP DMS check (android-16.0.0_r1):**
+`validatePackageName(Binder.getCallingUid(), packageName)` — ROOT_UID exempt;
+else `getPackagesForUid(uid)` must contain packageName. HyperOS uses "owner uid"
+message (line ~1933) — likely OEM fork validating an ownerUid (possibly from
+ApplicationInfo / AttributionSource) in addition to Binder callingUid.
+
+**Changes:**
+1. FakeContext package override + `ownerUidForPackage()`; AttributionSource and
+   ApplicationInfo.uid stay coherent with the requested package.
+2. Workarounds.updateFakePackageName sets override + AI.uid (fixes shell-package
+   wiring bug).
+3. DisplayManager SECURE create logs attrUid/appInfoUid/ownerUid; tries reflective
+   IDisplayManager/DMG overloads with explicit packageName (+ ownerUid if present).
+4. Client elevate: accept birth uid 1000 (`su 1000` / `su -c 'su 1000 …'`); server
+   can create SECURE VD when already AID_SYSTEM without mid-flight setresuid.
+5. Detect `SECURE_VD_OEM_REJECT` → Chinese UI tip: Magisk alone insufficient on
+   this HyperOS; need LSPosed + Disable FLAG_SECURE. Do not keep shipping blind
+   retries without user-visible honesty.
+
+**Expectation:** If HyperOS still rejects AID_SYSTEM SECURE VD after birth-as-1000
+and fixed AttributionSource/AI.uid, user sees the OEM-reject dialog; normal
+mirroring continues. Secure pages need LSPosed on that device.
 
 ### Secure capture / setresuid AID_SYSTEM (vc26 / 0.5.15)
 

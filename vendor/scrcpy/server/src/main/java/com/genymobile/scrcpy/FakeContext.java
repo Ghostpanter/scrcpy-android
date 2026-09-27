@@ -24,6 +24,14 @@ public final class FakeContext extends ContextWrapper {
 
     private static final FakeContext INSTANCE = new FakeContext();
 
+    /**
+     * Explicit package override for DisplayManager / Workarounds. When non-null,
+     * {@link #currentPackageName()} returns this instead of deriving solely from
+     * uid — fixes the bug where {@code runAsRootWithPackage(com.android.shell)}
+     * still logged/used {@code android} because ruid=0 always mapped to android.
+     */
+    private static volatile String packageOverride;
+
     public static FakeContext get() {
         return INSTANCE;
     }
@@ -41,6 +49,30 @@ public final class FakeContext extends ContextWrapper {
             // fall through to Process.myUid()
         }
         return Process.myUid() == 0;
+    }
+
+    /** True when process ruid (or myUid) is already AID_SYSTEM. */
+    public static boolean isSystemUid() {
+        try {
+            if (Os.getuid() == SYSTEM_UID) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // fall through
+        }
+        return Process.myUid() == SYSTEM_UID;
+    }
+
+    /**
+     * Set / clear the package name used by FakeContext and AttributionSource.
+     * Pass {@code null} to resume uid-derived defaults.
+     */
+    public static void setPackageOverride(String packageName) {
+        packageOverride = packageName;
+    }
+
+    public static String getPackageOverride() {
+        return packageOverride;
     }
 
     /**
@@ -73,11 +105,39 @@ public final class FakeContext extends ContextWrapper {
     }
 
     public static String currentPackageName() {
+        String override = packageOverride;
+        if (override != null && !override.isEmpty()) {
+            return override;
+        }
         int uid = binderIdentityUid();
         if (uid == SYSTEM_UID || uid == ROOT_UID) {
             return ROOT_PACKAGE_NAME;
         }
         return PACKAGE_NAME;
+    }
+
+    /**
+     * Uid that should own {@link #currentPackageName()} for OEM checks that
+     * compare package → getPackageUid (HyperOS "owner uid") rather than only
+     * Binder callingUid. Prefer override-driven mapping; else binder identity.
+     */
+    public static int ownerUidForPackage() {
+        String pkg = currentPackageName();
+        if (ROOT_PACKAGE_NAME.equals(pkg)) {
+            // AOSP validatePackageName exempts ROOT_UID, but HyperOS "owner uid"
+            // checks often require android ↔ 1000. When we are already SYSTEM or
+            // temporarily setresuid'd there, report 1000; when full root without
+            // override to shell, still report 1000 so package android matches.
+            int id = binderIdentityUid();
+            if (id == SYSTEM_UID || id == ROOT_UID) {
+                return SYSTEM_UID;
+            }
+            return SYSTEM_UID;
+        }
+        if (PACKAGE_NAME.equals(pkg)) {
+            return Process.SHELL_UID;
+        }
+        return binderIdentityUid();
     }
 
     private final ContentResolver contentResolver = new ContentResolver(this) {
@@ -129,18 +189,14 @@ public final class FakeContext extends ContextWrapper {
     @TargetApi(AndroidVersions.API_31_ANDROID_12)
     @Override
     public AttributionSource getAttributionSource() {
-        int euid = binderIdentityUid();
-        int attrUid;
-        String pkg;
-        if (euid == SYSTEM_UID) {
-            attrUid = SYSTEM_UID;
-            pkg = ROOT_PACKAGE_NAME;
-        } else if (euid == ROOT_UID) {
-            attrUid = ROOT_UID;
-            pkg = ROOT_PACKAGE_NAME;
-        } else {
+        int attrUid = ownerUidForPackage();
+        // When override forces shell under root ruid, AttributionSource must
+        // carry SHELL_UID even though binderIdentityUid is 0/1000.
+        String pkg = currentPackageName();
+        if (PACKAGE_NAME.equals(pkg)) {
             attrUid = Process.SHELL_UID;
-            pkg = PACKAGE_NAME;
+        } else if (ROOT_PACKAGE_NAME.equals(pkg)) {
+            attrUid = SYSTEM_UID;
         }
         AttributionSource.Builder builder = new AttributionSource.Builder(attrUid);
         builder.setPackageName(pkg);

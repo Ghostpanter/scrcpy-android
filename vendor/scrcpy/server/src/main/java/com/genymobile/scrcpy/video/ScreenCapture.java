@@ -165,8 +165,12 @@ public class ScreenCapture extends SurfaceCapture {
     private Exception tryOpenDisplay(Surface surface, Size inputSize) throws IOException {
         Exception firstFailure = null;
         boolean root = isRealUidRoot();
+        boolean systemUid = isRealUidSystem();
         if (root) {
             firstFailure = trySecureCapture(surface, inputSize);
+        } else if (systemUid) {
+            // Born as AID_SYSTEM (client su 1000) — no mid-flight setresuid.
+            firstFailure = trySecureAsCurrentSystem(surface, inputSize);
         }
 
         // On A16, SurfaceControl.createDisplay is gone. If secure already failed
@@ -209,11 +213,13 @@ public class ScreenCapture extends SurfaceCapture {
             Ln.i("Display: secure capture enabled (ruid=euid=1000)");
             return null;
         } catch (Exception systemException) {
+            logSecureRejectHint(systemException);
             Ln.w("Secure display via setresuid(AID_SYSTEM) failed, trying root identity variants",
                     systemException);
 
             // Secondary: callingUid==ROOT — AOSP exempts root from package checks;
             // HyperOS may not. Try android / shell package under full root euid.
+            // FakeContext.setPackageOverride ensures create logs/uses the requested pkg.
             for (String pkg : new String[] {
                     FakeContext.ROOT_PACKAGE_NAME,
                     FakeContext.PACKAGE_NAME,
@@ -223,6 +229,7 @@ public class ScreenCapture extends SurfaceCapture {
                     Ln.i("Display: secure capture enabled (ruid=0 euid=0 pkg=" + pkg + ")");
                     return null;
                 } catch (Exception e) {
+                    logSecureRejectHint(e);
                     Ln.w("Secure display as root pkg=" + pkg + " failed", e);
                 }
             }
@@ -366,9 +373,65 @@ public class ScreenCapture extends SurfaceCapture {
         }
     }
 
+    /**
+     * Already running as AID_SYSTEM (process started via Magisk {@code su 1000}).
+     * Sync FakeContext to package {@code android} / uid 1000 and create SECURE VD
+     * without setresuid (Binder identity is correct from process birth).
+     */
+    private Exception trySecureAsCurrentSystem(Surface surface, Size inputSize) {
+        String previousPkg = FakeContext.getPackageOverride();
+        try {
+            Workarounds.updateFakePackageName(FakeContext.ROOT_PACKAGE_NAME);
+            Ln.i("Display: already AID_SYSTEM ruid=" + Os.getuid()
+                    + " euid=" + Os.geteuid()
+                    + " pkg=" + FakeContext.currentPackageName());
+            openSecureDisplay(surface, inputSize);
+            Ln.i("Display: secure capture enabled (born as AID_SYSTEM)");
+            return null;
+        } catch (Exception e) {
+            logSecureRejectHint(e);
+            Ln.w("Secure display as born-AID_SYSTEM failed", e);
+            return e;
+        } finally {
+            if (previousPkg != null) {
+                Workarounds.updateFakePackageName(previousPkg);
+            } else {
+                Workarounds.clearFakePackageOverride();
+            }
+        }
+    }
+
+    private static void logSecureRejectHint(Throwable t) {
+        if (isPackageOwnerMismatch(t)) {
+            Ln.w("SECURE_VD_OEM_REJECT: DisplayManager refused packageName vs owner/calling uid "
+                    + "even with AID_SYSTEM identity. On this HyperOS/Android 16 build Magisk "
+                    + "alone cannot unlock FLAG_SECURE layers — need LSPosed + Disable "
+                    + "FLAG_SECURE (or equivalent). Marker for client UI.");
+        }
+    }
+
+    static boolean isPackageOwnerMismatch(Throwable t) {
+        while (t != null) {
+            String msg = t.getMessage();
+            if (msg != null && msg.contains("packageName must match")) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
     private static boolean isRealUidRoot() {
         try {
             return Os.getuid() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isRealUidSystem() {
+        try {
+            return Os.getuid() == FakeContext.SYSTEM_UID;
         } catch (Exception e) {
             return false;
         }
@@ -387,7 +450,7 @@ public class ScreenCapture extends SurfaceCapture {
      */
     private static void runAsSystemUid(RootAction action) throws Exception {
         int previousEuid = Os.geteuid();
-        String previousPkg = FakeContext.currentPackageName();
+        String previousOverride = FakeContext.getPackageOverride();
         boolean elevated = false;
         try {
             ensureRootEuid();
@@ -396,7 +459,8 @@ public class ScreenCapture extends SurfaceCapture {
             Workarounds.updateFakePackageName(FakeContext.ROOT_PACKAGE_NAME);
             Ln.i("Display: runAsSystemUid ruid=" + Os.getuid()
                     + " euid=" + Os.geteuid()
-                    + " pkg=" + FakeContext.currentPackageName());
+                    + " pkg=" + FakeContext.currentPackageName()
+                    + " ownerUid=" + FakeContext.ownerUidForPackage());
             action.run();
         } catch (ErrnoException e) {
             throw new IOException("setresuid(1000,1000,0) failed", e);
@@ -412,7 +476,7 @@ public class ScreenCapture extends SurfaceCapture {
                 Ln.w("Failed to restore uids after AID_SYSTEM attempt (ruid="
                         + safeGetuid() + " euid=" + safeGeteuid() + ")", e);
             }
-            Workarounds.updateFakePackageName(previousPkg);
+            restorePackageOverride(previousOverride);
         }
     }
 
@@ -422,14 +486,16 @@ public class ScreenCapture extends SurfaceCapture {
      */
     private static void runAsRootWithPackage(String packageName, RootAction action) throws Exception {
         int previousEuid = Os.geteuid();
-        String previousPkg = FakeContext.currentPackageName();
+        String previousOverride = FakeContext.getPackageOverride();
         try {
             ensureRootEuid();
             restoreRootUids(); // ruid=0 euid=0 suid=0
             Workarounds.updateFakePackageName(packageName);
             Ln.i("Display: runAsRootWithPackage ruid=" + Os.getuid()
                     + " euid=" + Os.geteuid()
-                    + " pkg=" + packageName);
+                    + " pkg=" + FakeContext.currentPackageName()
+                    + " (requested=" + packageName + ")"
+                    + " ownerUid=" + FakeContext.ownerUidForPackage());
             action.run();
         } catch (ErrnoException e) {
             throw new IOException("restore root for pkg=" + packageName + " failed", e);
@@ -444,7 +510,16 @@ public class ScreenCapture extends SurfaceCapture {
             } catch (ErrnoException e) {
                 Ln.w("Failed to restore euid=" + previousEuid, e);
             }
-            Workarounds.updateFakePackageName(previousPkg);
+            restorePackageOverride(previousOverride);
+        }
+    }
+
+    private static void restorePackageOverride(String previousOverride) {
+        if (previousOverride != null) {
+            Workarounds.updateFakePackageName(previousOverride);
+        } else {
+            Workarounds.clearFakePackageOverride();
+            Workarounds.syncApplicationInfoFromFakeContext();
         }
     }
 
