@@ -159,11 +159,11 @@
 
     <string name="prefer_shizuku">Enable Shizuku (this device)</string>
 
-    <string name="prefer_shizuku_help">On by default. Install and start Shizuku, then tap the button below to grant.</string>
+    <string name="prefer_shizuku_help">On by default. Install and start Shizuku, then tap the button below to grant. Important: Shizuku provides shell-only access on the controller; on Android 12+, it cannot show the target lock screen or encrypted gallery content (FLAG_SECURE). Those cases require Root elevation on the target.</string>
 
     <string name="shizuku_status">Shizuku status: %1$s</string>
 
-    <string name="shizuku_request">Request Shizuku permission</string>
+    <string name="shizuku_request">Request Shizuku permission (controller shell only)</string>
 
     <string name="shizuku_status_not_installed">not installed</string>
 

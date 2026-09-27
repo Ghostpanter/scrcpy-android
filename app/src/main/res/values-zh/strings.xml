@@ -160,11 +160,11 @@
 
     <string name="prefer_shizuku">启用 Shizuku（本机）</string>
 
-    <string name="prefer_shizuku_help">默认开启。需安装并启动 Shizuku，点下方按钮授权。</string>
+    <string name="prefer_shizuku_help">默认开启。需安装并启动 Shizuku，点下方按钮授权。注意：Shizuku 在控制端仅提供 shell 权限；Android 12 及以上无法显示目标设备锁屏或加密相册（FLAG_SECURE）内容，这些场景需在目标设备使用 Root 提权。</string>
 
     <string name="shizuku_status">Shizuku 状态：%1$s</string>
 
-    <string name="shizuku_request">请求 Shizuku 授权</string>
+    <string name="shizuku_request">请求 Shizuku 授权（仅控制端 shell）</string>
 
     <string name="shizuku_status_not_installed">未安装</string>
 
