@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-Updated: 2026-09-18 00:30 HKT (UTC+8)
+Updated: 2026-09-27 22:30 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 
@@ -61,8 +61,8 @@ the repo under `/workspace/secrets/`).
 | Field | Value |
 |-------|-------|
 | applicationId | `com.ghostpanter.scrcpy` |
-| versionName | `0.5.16-ghostpanter` |
-| versionCode | `27` |
+| versionName | `0.5.17-ghostpanter` |
+| versionCode | `28` |
 | minSdk | 31 (Android 12+) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
@@ -109,6 +109,31 @@ before `assembleRelease`.
 
 
 
+
+
+### Secure capture / LSPosed System Framework scope (vc28 / 0.5.17)
+
+**User finding (MI 9 HyperOS Android 16 + Magisk + JingMatrix LSPosed):** Enable
+Screenshot (Disable FLAG_SECURE) with scope **System Framework only** (do **not**
+enable 系统界面 / SystemUI) makes encrypted album / FLAG_SECURE content visible in
+scrcpy. Magisk-alone SECURE VD still hits `SECURE_VD_OEM_REJECT` on 0.5.16.
+Module **v5.0.1** may break wireless ADB on this OEM; prefer **v4.2.0**.
+
+**Why System Framework alone (short Chinese for UI/docs):**
+
+> scrcpy 经 DisplayManager / SurfaceFlinger（system_server）抓屏，FLAG_SECURE /
+> 加密相册黑屏由框架合成路径拦截；钩住「系统框架」即可让镜像看到加密内容。
+> 「系统界面 / SystemUI」作用域只影响 SystemUI 自己的截图与窗口，对本抓屏路径
+> 无必要，勾选还可能带来副作用。本 APK 不能内嵌完整 Xposed 模块替代 LSPosed。
+
+**UI / docs:** Settings + OEM-reject tip list exact steps — Magisk Zygisk →
+JingMatrix LSPosed → Enable Screenshot **v4.2.0**
+(https://github.com/LSPosed/DisableFlagSecure/releases/tag/v4.2.0) → scope
+仅系统框架 → 不要勾选系统界面 → reboot → scrcpy. Soft tip when log has
+`SECURE_VD_OEM_REJECT` points to the same recipe.
+
+**Expectation:** Normal mirroring still works without LSPosed. Secure/encrypted
+pages on HyperOS that reject AID_SYSTEM SECURE VD need the Framework-only scope.
 
 
 ### Secure capture / package override + OEM reject UI (vc27 / 0.5.16)

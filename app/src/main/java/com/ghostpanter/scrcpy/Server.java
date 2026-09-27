@@ -98,8 +98,9 @@ public final class Server {
         FALLBACK,
         /**
          * Root/system identity worked but DisplayManager rejected SECURE VD
-         * (packageName must match the owner uid). HyperOS A16 needs LSPosed
-         * + Disable FLAG_SECURE — Magisk alone is not enough.
+         * (packageName must match the owner uid). HyperOS A16 needs JingMatrix
+         * LSPosed + Enable Screenshot with System Framework scope only —
+         * Magisk alone is not enough.
          */
         SECURE_OEM_REJECTED
     }

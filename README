@@ -161,6 +161,29 @@ Vendor updates are manual because the ADB transport carries overlapping local
 security and flow-control changes. See `vendor/libadb-android/README.md`.
 
 
+
+
+HyperOS secure layers (optional)
+--------------------------------
+Normal mirroring does not need root or LSPosed. On some HyperOS / Android 16
+builds, Magisk elevation alone still cannot create a secure virtual display
+(`SECURE_VD_OEM_REJECT`); lock screen and encrypted albums stay black in the
+mirror.
+
+Then on the **target** (not bundled in this APK):
+
+1. Magisk → enable Zygisk
+2. Install [JingMatrix LSPosed](https://github.com/JingMatrix/LSPosed)
+3. Install [Enable Screenshot v4.2.0](https://github.com/LSPosed/DisableFlagSecure/releases/tag/v4.2.0)
+   (Disable FLAG_SECURE). Prefer v4.2.0 — v5.0.1 may break wireless ADB on HyperOS.
+4. In LSPosed, enable the module with scope **System Framework only**.
+   Do **not** enable 系统界面 / SystemUI.
+5. Reboot, then connect with scrcpy-android.
+
+scrcpy captures via DisplayManager/SurfaceFlinger in system_server; Framework
+hooks unlock FLAG_SECURE for that path. SystemUI scope is unnecessary for this
+OEM encrypted-album case and may hurt.
+
 License
 -------
 The application is Apache-2.0; see `LICENSE`. Bundled component notices,

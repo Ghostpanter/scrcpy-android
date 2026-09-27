@@ -406,8 +406,14 @@ public final class Mirror extends Activity {
             }
         }
         if (offerLogs) {
+            String dialogMsg = msg + "\n\n" + getString(R.string.elevate_open_logs_hint);
+            if (status == Server.ElevateStatus.SECURE_OEM_REJECTED) {
+                // Soft tip: exact Framework-only LSPosed recipe (toast truncates).
+                dialogMsg = msg + "\n\n" + getString(R.string.secure_content_lsposed)
+                        + "\n\n" + getString(R.string.elevate_open_logs_hint);
+            }
             new AlertDialog.Builder(this)
-                    .setMessage(msg + "\n\n" + getString(R.string.elevate_open_logs_hint))
+                    .setMessage(dialogMsg)
                     .setPositiveButton(R.string.elevate_fallback_view_logs,
                             (d, w) -> openLogViewer())
                     .setNegativeButton(android.R.string.ok, null)

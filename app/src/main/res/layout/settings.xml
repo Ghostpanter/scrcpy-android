@@ -408,6 +408,13 @@
                 android:paddingTop="@dimen/space_sm"
                 android:text="@string/secure_content_shizuku"/>
 
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="@dimen/space_sm"
+                android:text="@string/secure_content_lsposed"/>
+
             <CheckBox
                 android:id="@+id/root_capture_secure"
                 style="@style/RadioOption"

@@ -51,7 +51,7 @@
     <string name="elevate_su_denied">提权失败：Magisk 未授权或超时。安全层仍为黑屏。请在被控端允许 shell/ADB 后点重新连接。</string>
     <string name="elevate_su_unavailable">未检测到可用 su（无 Root/Magisk）。安全层仍为黑屏；可用「解锁」盲输 PIN，或安装 Magisk 并开启 Root 提权。</string>
     <string name="elevate_fallback">提权失败仍黑屏：未能以 uid 0 启动 server，已回退普通 shell。请打开「设置→日志」查看完整 probe/start 报错；确认 Magisk 已允许 Shell 后点重新连接。</string>
-    <string name="elevate_secure_oem_rejected">Root 已获取且普通镜像可用，但本机 HyperOS/Android 16 的 DisplayManager 拒绝了安全虚拟显示（packageName must match the owner uid）。仅 Magisk 无法解开锁屏/加密相册等 FLAG_SECURE 黑屏；请另装 LSPosed + Disable FLAG_SECURE（或同类模块），本应用不附带。可用「解锁」盲输 PIN。</string>
+    <string name="elevate_secure_oem_rejected">Root 已获取且普通镜像可用，但本机 HyperOS/Android 16 的 DisplayManager 拒绝了安全虚拟显示（packageName must match the owner uid / SECURE_VD_OEM_REJECT）。仅 Magisk 无法解开锁屏/加密相册等 FLAG_SECURE 黑屏。请在被控端：Magisk 开启 Zygisk → 安装 JingMatrix LSPosed → 启用模块 Enable Screenshot（Disable FLAG_SECURE，推荐 v4.2.0：https://github.com/LSPosed/DisableFlagSecure/releases/tag/v4.2.0）→ 作用域仅勾选「系统框架 / System Framework」→ 不要勾选「系统界面 / SystemUI」→ 重启后再开 scrcpy。v5.0.1 在部分 HyperOS 上可能破坏无线 ADB，优先用 v4.2.0。本应用不附带该模块。可用「解锁」盲输 PIN。</string>
     
     <string name="log_viewer_title">日志</string>
     <string name="log_viewer_caption">查看提权 / ADB / su / server 完整输出（解决 toast 截断）。可筛选等级、复制或分享。</string>
@@ -179,13 +179,15 @@
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">安全内容 / Root / Shizuku</string>
     <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏/图案请先在手机上操作。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用在镜像中仍为黑屏，无法远程预览加密相册。</string>
-    <string name="secure_content_root">Root（推荐）：开启后以 Magisk su 启动已修补 server（uid 0 或尝试 uid 1000），并用 AID_SYSTEM 身份创建 VIRTUAL_DISPLAY_FLAG_SECURE 镜像。失败自动回退普通镜像。若日志出现 packageName must match the owner uid，说明本机 HyperOS 拒绝了安全 VD——需另装 Magisk+LSPosed+Disable FLAG_SECURE（本应用不附带），不能只靠 Root。</string>
+    <string name="secure_content_root">Root（推荐）：开启后以 Magisk su 启动已修补 server（uid 0 或尝试 uid 1000），并用 AID_SYSTEM 创建 VIRTUAL_DISPLAY_FLAG_SECURE 镜像。失败自动回退普通镜像。若日志出现 SECURE_VD_OEM_REJECT / packageName must match the owner uid，说明本机 HyperOS 拒绝了安全 VD——不能只靠 Magisk，需另装 LSPosed + Enable Screenshot（见下方步骤）。</string>
 
     <string name="secure_content_shizuku">Shizuku（本机 shell）：可在本控制端授权 Shizuku，便于本机 shell 能力。Shizuku 仅为 shell uid，不能替代被控端 Root；Android 12+ 被控端锁屏/加密相册的 FLAG_SECURE 仍需被控端 Root 提权。无线 ADB 路径始终可用。</string>
 
-    <string name="root_capture_secure">Root 提权捕获安全层（su）</string>
+    
+    <string name="secure_content_lsposed">LSPosed 解锁涉密层（HyperOS 实测）：Magisk Zygisk → JingMatrix LSPosed → Enable Screenshot （Disable FLAG_SECURE；推荐 v4.2.0，链接见 OEM 拒绝提示）→ 作用域仅「系统框架 / System Framework」→ 不要勾选「系统界面 / SystemUI」→ 重启 → 再开 scrcpy。原因：scrcpy 经 DisplayManager/SurfaceFlinger（system_server）抓屏，FLAG_SECURE/加密相册黑屏由框架合成路径拦截；钩住系统框架即可让镜像看到加密内容，SystemUI 作用域只影响系统界面自己的截图/窗口，对本路径无必要，勾选还可能带来副作用。注意：v5.0.1 在部分 HyperOS 上可能破坏无线 ADB，优先 v4.2.0。本 APK 不内嵌 Xposed 模块。</string>
+<string name="root_capture_secure">Root 提权捕获安全层（su）</string>
 
-    <string name="root_capture_secure_help">默认开启。连接时请求 su；成功后以 root 或 AID_SYSTEM 尝试安全虚拟显示。HyperOS/Android 16 若仍报 packageName must match the owner uid，安全层会保持黑屏，需 LSPosed+Disable FLAG_SECURE（不附带）。普通画面仍可用。</string>
+    <string name="root_capture_secure_help">默认开启。连接时请求 su；成功后以 root 或 AID_SYSTEM 尝试安全虚拟显示。HyperOS/Android 16 若仍报 SECURE_VD_OEM_REJECT，安全层会保持黑屏，需按下方 LSPosed 步骤操作（不附带）。普通画面仍可用。</string>
 
     <string name="prefer_shizuku">启用 Shizuku（本机）</string>
 

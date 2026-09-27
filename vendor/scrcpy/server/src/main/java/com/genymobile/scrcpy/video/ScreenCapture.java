@@ -405,8 +405,9 @@ public class ScreenCapture extends SurfaceCapture {
         if (isPackageOwnerMismatch(t)) {
             Ln.w("SECURE_VD_OEM_REJECT: DisplayManager refused packageName vs owner/calling uid "
                     + "even with AID_SYSTEM identity. On this HyperOS/Android 16 build Magisk "
-                    + "alone cannot unlock FLAG_SECURE layers — need LSPosed + Disable "
-                    + "FLAG_SECURE (or equivalent). Marker for client UI.");
+                    + "alone cannot unlock FLAG_SECURE layers — need JingMatrix LSPosed + "
+                    + "Enable Screenshot (Disable FLAG_SECURE) with scope System Framework "
+                    + "ONLY (do not enable SystemUI); prefer module v4.2.0. Marker for client UI.");
         }
     }
 
