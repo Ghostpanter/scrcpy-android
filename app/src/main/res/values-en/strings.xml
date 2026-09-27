@@ -148,7 +148,7 @@
 
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">Secure content / Root</string>
-    <string name="secure_content_nonroot">Non-root: use Unlock on the mirror to enter PIN/password blindly; wake/unlock on the phone first if needed. On Android 12+ the lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
-    <string name="secure_content_root">Root (optional; this app does not bundle modules): on the target install Magisk + LSPosed (Zygisk) + Disable FLAG_SECURE (io.github.lsposed.disableflagsecure), reboot, then lock screen, encrypted gallery, and banking apps usually mirror normally.</string>
+    <string name="secure_content_nonroot">Non-root: use Unlock on the mirror to enter PIN/password blindly; wake/unlock patterns on the phone first. On Android 12+ the lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
+    <string name="secure_content_root">Root (optional; this app bundles no modules): today you can use Magisk + LSPosed (Zygisk) + Disable FLAG_SECURE (io.github.lsposed.disableflagsecure); after reboot, lock screen, encrypted gallery, and banking apps usually mirror. A following release will add automatic su elevation of the official scrcpy-server (no Xposed; scrcpy-root style). You can also use magiskpolicy/sepolicy or framework/SurfaceFlinger patches (heavy).</string>
 
 </resources>

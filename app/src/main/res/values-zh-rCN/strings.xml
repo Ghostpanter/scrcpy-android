@@ -149,7 +149,7 @@
 
     <!-- Settings: secure content / root guidance -->
     <string name="secure_content_title">安全内容 / Root</string>
-    <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏请先在手机上点亮。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用画面仍为黑屏，无法远程预览加密相册。</string>
-    <string name="secure_content_root">Root（可选，本应用不附带模块）：在被控端安装 Magisk + LSPosed（Zygisk）+ Disable FLAG_SECURE 模块（io.github.lsposed.disableflagsecure），重启后锁屏、加密相册与银行类应用一般可正常镜像。不会绕过系统安全策略以外的限制。</string>
+    <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏/图案请先在手机上操作。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用画面仍为黑屏，无法远程预览加密相册。</string>
+    <string name="secure_content_root">Root（可选，本应用不附带模块）：当前可用 Magisk + LSPosed（Zygisk）+ Disable FLAG_SECURE（io.github.lsposed.disableflagsecure），重启后锁屏、加密相册与银行类应用一般可正常镜像。后续版本计划增加自动 su 提权启动官方 scrcpy-server（无需 Xposed，类似 scrcpy-root）；亦可自行用 magiskpolicy/sepolicy 或改 framework/SurfaceFlinger（较重）。</string>
 
 </resources>
