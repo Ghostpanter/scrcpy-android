@@ -45,3 +45,33 @@ Requirements for `assembleDebug`:
 - `app/src/main/assets/scrcpy-server.jar` is intentionally gitignored; regenerate with `./scripts/update-server`.
 - Debug builds use the AGP debug keystore.
 - Do not commit `local.properties`, ADB identity keys, or keystores.
+
+
+## Install / signing (v0.5.9)
+
+Root cause of “无法安装 / App not installed” on the first v0.5.9 GitHub
+asset: the APK was **unsigned** (`assembleRelease` without `KEYSTORE_*`).
+Android PackageInstaller rejects unsigned APKs.
+
+Release builds now **require** `KEYSTORE_PATH` / `KEYSTORE_PASS` /
+`KEY_ALIAS` / `KEY_PASS` and fail the Gradle task if they are missing.
+APKs are signed V1+V2 with the Ghostpanter release keystore (kept outside
+the repo under `/workspace/secrets/`).
+
+| Field | Value |
+|-------|-------|
+| applicationId | `com.ghostpanter.scrcpy` |
+| versionName | `0.5.9-ghostpanter` |
+| versionCode | `16` |
+| minSdk | 31 (Android 12+) |
+| ABIs | `arm64-v8a`, `x86_64` |
+
+**Upgrade notes**
+
+- Fresh install: open the APK (allow install from this source) or
+  `adb install scrcpy-android.apk`.
+- If a previous **debug**-signed Ghostpanter build is installed, Android
+  will refuse the update (different signing key). Uninstall
+  `com.ghostpanter.scrcpy` first, then install this release.
+- The broken unsigned v0.5.9 asset never installed, so most users only
+  need a fresh install of the replaced asset.

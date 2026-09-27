@@ -17,7 +17,7 @@ android {
         applicationId 'com.ghostpanter.scrcpy'
         minSdk 31
         targetSdk 37
-        versionCode 15
+        versionCode 16
         versionName '0.5.9-ghostpanter'
     }
 
@@ -45,6 +45,10 @@ android {
                 storePassword System.getenv('KEYSTORE_PASS')
                 keyAlias      System.getenv('KEY_ALIAS')
                 keyPassword   System.getenv('KEY_PASS')
+                // V1+V2: minSdk 31 only needs V2, but some OEM package
+                // installers still choke without JAR (V1) signatures.
+                v1SigningEnabled true
+                v2SigningEnabled true
             }
         }
     }
@@ -133,6 +137,24 @@ android {
         }
     }
 }
+
+// Guard: never ship an unsigned release APK. Without KEYSTORE_* AGP still
+// produces a .apk that PackageInstaller rejects ("App not installed" /
+// parse error). Fail early so a release cannot upload a broken artifact.
+afterEvaluate {
+    def signingReady = ['KEYSTORE_PATH', 'KEYSTORE_PASS', 'KEY_ALIAS', 'KEY_PASS']
+            .every { System.getenv(it) }
+    tasks.named('assembleRelease').configure {
+        doFirst {
+            if (!signingReady) {
+                throw new GradleException(
+                    'assembleRelease requires KEYSTORE_PATH, KEYSTORE_PASS, KEY_ALIAS, KEY_PASS. '
+                    + 'Refusing to build an unsigned release APK.')
+            }
+        }
+    }
+}
+
 
 dependencies {
     implementation project(':adb')

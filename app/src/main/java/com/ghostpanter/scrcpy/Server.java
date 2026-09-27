@@ -2,9 +2,11 @@ package com.ghostpanter.scrcpy;
 
 import android.content.Context;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.net.ConnectException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -33,6 +35,11 @@ import io.github.muntashirakon.adb.AdbStream;
 public final class Server {
 
     private static final String REMOTE_PATH    = "/data/local/tmp/scrcpy-server.jar";
+    // Written before su elevate so Magisk grants a short, stable cmdline
+    // (avoids quoting breakage on long CLASSPATH=... app_process lines).
+    private static final String REMOTE_START   = "/data/local/tmp/scrcpy-gp-start.sh";
+    private static final String REMOTE_PROBE   = "/data/local/tmp/scrcpy-gp-probe.sh";
+    private static final int    SCRIPT_MODE    = 0100755;         // regular file, 0755
     private static final String ASSET_JAR      = "scrcpy-server.jar";
     private static final String ASSET_VERSION  = "scrcpy-server.version";
     private static final int    FILE_MODE      = 0100644;         // regular file, 0644
@@ -176,11 +183,14 @@ public final class Server {
     }
 
     // Magisk / KernelSU: `su 0` runs as uid 0; `su -c` is the portable form.
-    private String elevateCmd(String plain) {
-        if ("su_c".equals(suForm)) {
-            return "su -c " + shellSingleQuote(plain);
+    // Prefer running a pushed script so Magisk sees a short request and we
+    // avoid shell-quoting hazards on the long CLASSPATH/app_process line.
+    private String elevateCmd(String plain) throws Exception {
+        pushTextFile(REMOTE_START, "#!/system/bin/sh\n" + plain + "\n", SCRIPT_MODE);
+        if (suForm != null && suForm.startsWith("su_c")) {
+            return "su -c " + shellSingleQuote("sh " + REMOTE_START);
         }
-        return "su 0 sh -c " + shellSingleQuote(plain);
+        return "su 0 sh " + REMOTE_START;
     }
 
     private static String shellSingleQuote(String s) {
@@ -200,7 +210,16 @@ public final class Server {
         // Prefer Magisk-style `su 0`, then portable `su -c`.
         // Stop on DENIED/timeout — a second 60s wait would only annoy the user
         // after they already ignored/denied the Magisk dialog.
+        // Push a tiny probe script first so Magisk's Superuser UI gets a
+        // stable short path (some Magisk builds are flaky with long inline -c).
+        try {
+            pushTextFile(REMOTE_PROBE, "#!/system/bin/sh\nid -u\n", SCRIPT_MODE);
+        } catch (Exception e) {
+            Log.w("server: could not push su probe script: %s", e);
+        }
         String[][] forms = {
+                {"su0_script", "su 0 sh " + REMOTE_PROBE},
+                {"su_c_script", "su -c " + shellSingleQuote("sh " + REMOTE_PROBE)},
                 {"su0", "su 0 id -u"},
                 {"su_c", "su -c " + shellSingleQuote("id -u")},
         };
@@ -458,6 +477,19 @@ public final class Server {
     }
 
     // ---- adb sync push ----
+
+    private void pushTextFile(String remotePath, String body, int mode) throws Exception {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        AdbStream sync = adb.openSync();
+        try (InputStream src = new ByteArrayInputStream(bytes)) {
+            int mtime = (int) (System.currentTimeMillis() / 1000L);
+            Sync.push(src, sync.openOutputStream(), sync.openInputStream(),
+                    remotePath, mode, mtime);
+        } finally {
+            try { sync.close(); } catch (IOException ignored) {}
+        }
+        Log.i("push script %s bytes=%d", remotePath, bytes.length);
+    }
 
     private long push() throws Exception {
         AdbStream sync = adb.openSync();
