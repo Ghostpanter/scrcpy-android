@@ -401,6 +401,57 @@
                 android:layout_height="wrap_content"
                 android:text="@string/secure_content_root"/>
 
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="@dimen/space_sm"
+                android:text="@string/secure_content_shizuku"/>
+
+            <CheckBox
+                android:id="@+id/root_capture_secure"
+                style="@style/RadioOption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/root_capture_secure"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/root_capture_secure_help"/>
+
+            <CheckBox
+                android:id="@+id/prefer_shizuku"
+                style="@style/RadioOption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/prefer_shizuku"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/prefer_shizuku_help"/>
+
+            <TextView
+                android:id="@+id/shizuku_status"
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="@dimen/space_sm"
+                android:text="@string/shizuku_status"/>
+
+            <Button
+                android:id="@+id/shizuku_request"
+                style="@style/Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/shizuku_request"/>
+
         </LinearLayout>
 
         <Button

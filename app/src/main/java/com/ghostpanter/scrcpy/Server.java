@@ -69,11 +69,40 @@ public final class Server {
         long pushed = push();
         Log.i("push %s bytes=%d", REMOTE_PATH, pushed);
 
+        // Prefer root-elevated spawn when the user wants secure-layer capture
+        // and the target has a working su (Magisk / KernelSU). Official
+        // scrcpy-server.jar is unchanged; we only wrap the launch as uid 0
+        // (scrcpy-root style) so createDisplay(secure) can succeed on
+        // Android 12+. Any elevate failure falls back to a normal shell start.
+        boolean wantElevate = Settings.rootCaptureSecure(ctx);
+        boolean suAvailable = wantElevate && probeSu();
+        if (wantElevate && !suAvailable) {
+            Log.i("server: root capture on but su not available; using shell");
+        }
+
+        if (suAvailable) {
+            String scid = newScid();
+            String plain = buildCmdline(version, scid);
+            String elevated = elevateCmd(plain);
+            Log.i("spawn server (root) ver=%s scid=%s", version, scid);
+            Log.i("cmdline: %s", elevated);
+            try {
+                return spawnAndConnect(elevated, scid);
+            } catch (Exception e) {
+                Log.w("server: root elevate failed, falling back to shell: %s", e);
+                closeShell();
+                serverEof = false;
+            }
+        }
+
         String scid = newScid();
         String cmd = buildCmdline(version, scid);
         Log.i("spawn server ver=%s scid=%s", version, scid);
         Log.i("cmdline: %s", cmd);
+        return spawnAndConnect(cmd, scid);
+    }
 
+    private Streams spawnAndConnect(String cmd, String scid) throws Exception {
         AdbStream va = null, aa = null, ca = null;
         boolean committed = false;
         try {
@@ -106,6 +135,62 @@ public final class Server {
                 closeQuietly(ca);
                 closeShell();
             }
+        }
+    }
+
+    // Magisk / KernelSU: `su 0` runs the command as uid 0.
+    private static String elevateCmd(String plain) {
+        return "su 0 sh -c " + shellSingleQuote(plain);
+    }
+
+    private static String shellSingleQuote(String s) {
+        // Wrap for sh -c; embed apostrophes as '\''.
+        return "'" + s.replace("'", "'\''") + "'";
+    }
+
+    // Best-effort: true only when `su 0 id -u` reports 0 within a short budget.
+    private boolean probeSu() {
+        AdbStream s = null;
+        Thread reader = null;
+        final StringBuilder out = new StringBuilder();
+        try {
+            s = adb.openShell("su 0 id -u");
+            AdbStream ref = s;
+            reader = new Thread(() -> {
+                try (InputStream in = ref.openInputStream()) {
+                    byte[] buf = new byte[64];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        for (int i = 0; i < n; i++) {
+                            char c = (char) (buf[i] & 0xff);
+                            if (c >= 0x20 && c <= 0x7e) out.append(c);
+                        }
+                        if (out.length() > 32) break;
+                    }
+                } catch (IOException ignored) {}
+            }, "su-probe");
+            reader.setDaemon(true);
+            reader.start();
+            reader.join(2_500L);
+            String textOut = out.toString().trim();
+            boolean ok = false;
+            if (!textOut.isEmpty()) {
+                int end = 0;
+                while (end < textOut.length() && Character.isDigit(textOut.charAt(end))) end++;
+                if (end > 0) {
+                    try { ok = Integer.parseInt(textOut.substring(0, end)) == 0; }
+                    catch (NumberFormatException ignored) {}
+                }
+                if (!ok) ok = textOut.contains("uid=0");
+            }
+            Log.i("server: su probe -> %s (raw=%s)", ok, textOut);
+            return ok;
+        } catch (Exception e) {
+            Log.i("server: su probe failed: %s", e);
+            return false;
+        } finally {
+            if (reader != null && reader.isAlive()) reader.interrupt();
+            closeQuietly(s);
         }
     }
 

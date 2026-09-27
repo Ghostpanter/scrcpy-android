@@ -11,6 +11,10 @@
         android:usesPermissionFlags="neverForLocation"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
+    <queries>
+        <package android:name="moe.shizuku.privileged.api"/>
+    </queries>
+
     <!-- spake2-android has no targetSdk in its manifest. The merger adds
          obsolete implicit permissions after evaluating these removals, so
          it misleadingly warns that no declaration is present. The rules are
@@ -83,6 +87,14 @@
             android:name=".Sessions"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"/>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"/>
 
     </application>
 

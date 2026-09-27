@@ -148,8 +148,30 @@
     <string name="unlock_power">电源键</string>
 
     <!-- Settings: secure content / root guidance -->
-    <string name="secure_content_title">安全内容 / Root</string>
-    <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏/图案请先在手机上操作。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用画面仍为黑屏，无法远程预览加密相册。</string>
-    <string name="secure_content_root">Root（可选，本应用不附带模块）：当前可用 Magisk + LSPosed（Zygisk）+ Disable FLAG_SECURE（io.github.lsposed.disableflagsecure），重启后锁屏、加密相册与银行类应用一般可正常镜像。后续版本计划增加自动 su 提权启动官方 scrcpy-server（无需 Xposed，类似 scrcpy-root）；亦可自行用 magiskpolicy/sepolicy 或改 framework/SurfaceFlinger（较重）。</string>
+    <string name="secure_content_title">安全内容 / Root / Shizuku</string>
+    <string name="secure_content_nonroot">非 Root：镜像页「解锁」可盲输 PIN/密码；锁屏/图案请先在手机上操作。Android 12+ 锁屏、加密相册/图库与 FLAG_SECURE 应用在镜像中仍为黑屏，无法远程预览加密相册。</string>
+    <string name="secure_content_root">Root（推荐，无需 Xposed）：开启「Root 提权捕获安全层」后，若被控端 su 可用，将以 uid 0 启动官方 scrcpy-server（类似 scrcpy-root），一般可镜像锁屏与加密相册；失败则回退普通 shell。亦可选用 Magisk+LSPosed+Disable FLAG_SECURE 模块（本应用不附带）。</string>
+
+    <string name="secure_content_shizuku">Shizuku（本机 shell）：可在本控制端授权 Shizuku，便于本机 shell 能力。Shizuku 仅为 shell uid，不能替代被控端 Root；Android 12+ 被控端锁屏/加密相册的 FLAG_SECURE 仍需被控端 Root 提权。无线 ADB 路径始终可用。</string>
+
+    <string name="root_capture_secure">Root 提权捕获安全层（su）</string>
+
+    <string name="root_capture_secure_help">默认开启。检测被控端 su，成功则以 root 启动 server；无 Root 或失败时自动回退。不修改 scrcpy-server.jar。</string>
+
+    <string name="prefer_shizuku">启用 Shizuku（本机）</string>
+
+    <string name="prefer_shizuku_help">默认开启。需安装并启动 Shizuku，点下方按钮授权。</string>
+
+    <string name="shizuku_status">Shizuku 状态：%1$s</string>
+
+    <string name="shizuku_request">请求 Shizuku 授权</string>
+
+    <string name="shizuku_status_not_installed">未安装</string>
+
+    <string name="shizuku_status_dead">未运行</string>
+
+    <string name="shizuku_status_denied">未授权</string>
+
+    <string name="shizuku_status_granted">已授权</string>
 
 </resources>

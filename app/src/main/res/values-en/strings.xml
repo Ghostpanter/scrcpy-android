@@ -147,8 +147,30 @@
     <string name="unlock_power">Power</string>
 
     <!-- Settings: secure content / root guidance -->
-    <string name="secure_content_title">Secure content / Root</string>
-    <string name="secure_content_nonroot">Non-root: use Unlock on the mirror to enter PIN/password blindly; wake/unlock patterns on the phone first. On Android 12+ the lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
-    <string name="secure_content_root">Root (optional; this app bundles no modules): today you can use Magisk + LSPosed (Zygisk) + Disable FLAG_SECURE (io.github.lsposed.disableflagsecure); after reboot, lock screen, encrypted gallery, and banking apps usually mirror. A following release will add automatic su elevation of the official scrcpy-server (no Xposed; scrcpy-root style). You can also use magiskpolicy/sepolicy or framework/SurfaceFlinger patches (heavy).</string>
+    <string name="secure_content_title">Secure content / Root / Shizuku</string>
+    <string name="secure_content_nonroot">Non-root: use Unlock on the mirror for blind PIN/password; unlock patterns on the phone first. On Android 12+ lock screen, encrypted gallery, and FLAG_SECURE apps stay black — encrypted albums cannot be previewed remotely.</string>
+    <string name="secure_content_root">Root (preferred, no Xposed): with “Elevate server for secure layers (su)” on, if the target has working su we start the official scrcpy-server as uid 0 (scrcpy-root style); lock screen and encrypted gallery usually mirror. Falls back to normal shell on failure. Magisk+LSPosed+Disable FLAG_SECURE is optional (not bundled).</string>
+
+    <string name="secure_content_shizuku">Shizuku (local shell): authorize Shizuku on this controller for local shell helpers. Shizuku is only shell uid — it does not replace Root on the target. Android 12+ FLAG_SECURE lock/gallery on the target still need Root elevate there. Wireless ADB always remains available.</string>
+
+    <string name="root_capture_secure">Elevate server for secure layers (su)</string>
+
+    <string name="root_capture_secure_help">On by default. Probes su on the target and starts the server as root when available; auto-falls back otherwise. Does not modify scrcpy-server.jar.</string>
+
+    <string name="prefer_shizuku">Enable Shizuku (this device)</string>
+
+    <string name="prefer_shizuku_help">On by default. Install and start Shizuku, then tap the button below to grant.</string>
+
+    <string name="shizuku_status">Shizuku status: %1$s</string>
+
+    <string name="shizuku_request">Request Shizuku permission</string>
+
+    <string name="shizuku_status_not_installed">not installed</string>
+
+    <string name="shizuku_status_dead">not running</string>
+
+    <string name="shizuku_status_denied">denied</string>
+
+    <string name="shizuku_status_granted">granted</string>
 
 </resources>

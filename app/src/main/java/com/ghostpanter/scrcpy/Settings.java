@@ -19,6 +19,8 @@ public final class Settings {
     public static final String LOW_LATENCY   = "low_latency";     // prefer low-latency encoder
     public static final String HINT_BACK_SHOWN = "hint_back_shown"; // first-run UI hint
     public static final String CLIPBOARD       = "clipboard";       // two-way clipboard sync
+    public static final String ROOT_CAPTURE   = "root_capture";    // su-elevate server
+    public static final String PREFER_SHIZUKU = "prefer_shizuku";  // use Shizuku when available
 
     public static final String DEFAULT_VIDEO_CODEC    = "h264";
     public static final String DEFAULT_AUDIO_CODEC    = "opus";
@@ -35,6 +37,9 @@ public final class Settings {
     // can read whatever is copied on this device and write anything it
     // likes back - and because there was previously no way to decline.
     public static final boolean DEFAULT_CLIPBOARD     = true;
+    // Default ON: when the target has su we elevate; when not, probe is a no-op.
+    public static final boolean DEFAULT_ROOT_CAPTURE  = true;
+    public static final boolean DEFAULT_PREFER_SHIZUKU = true;
 
     private Settings() {}
 
@@ -144,6 +149,22 @@ public final class Settings {
 
     public static void setClipboardSync(Context ctx, boolean v) {
         prefs(ctx).edit().putBoolean(CLIPBOARD, v).apply();
+    }
+
+    public static boolean rootCaptureSecure(Context ctx) {
+        return bool(ctx, ROOT_CAPTURE, DEFAULT_ROOT_CAPTURE);
+    }
+
+    public static void setRootCaptureSecure(Context ctx, boolean v) {
+        prefs(ctx).edit().putBoolean(ROOT_CAPTURE, v).apply();
+    }
+
+    public static boolean preferShizuku(Context ctx) {
+        return bool(ctx, PREFER_SHIZUKU, DEFAULT_PREFER_SHIZUKU);
+    }
+
+    public static void setPreferShizuku(Context ctx, boolean v) {
+        prefs(ctx).edit().putBoolean(PREFER_SHIZUKU, v).apply();
     }
 
 

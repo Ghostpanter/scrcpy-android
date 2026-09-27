@@ -11,10 +11,14 @@ import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
+import rikka.shizuku.Shizuku;
+
 // Codec choice + streaming knobs. All persisted to SharedPreferences
 // via Settings on click; the next session bringup reads them and
 // applies to the scrcpy server cmdline.
 public final class SettingsActivity extends Activity {
+
+    private Shizuku.OnRequestPermissionResultListener shizukuPermissionListener;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -103,6 +107,42 @@ public final class SettingsActivity extends Activity {
             Log.i("settings: clipboard=%b", checked);
         });
 
+        CheckBox rootCaptureBox = findViewById(R.id.root_capture_secure);
+        rootCaptureBox.setOnCheckedChangeListener((b, checked) -> {
+            Settings.setRootCaptureSecure(this, checked);
+            Log.i("settings: root_capture=%b", checked);
+        });
+
+        CheckBox preferShizukuBox = findViewById(R.id.prefer_shizuku);
+        preferShizukuBox.setOnCheckedChangeListener((b, checked) -> {
+            Settings.setPreferShizuku(this, checked);
+            Log.i("settings: prefer_shizuku=%b", checked);
+            if (checked && ShizukuHelper.isReady(this)) {
+                ShizukuHelper.bindUserService(this);
+            }
+            refreshShizukuStatus();
+        });
+
+        findViewById(R.id.shizuku_request).setOnClickListener(v -> {
+            if (!ShizukuHelper.isInstalled(this)) {
+                Toast.makeText(this, R.string.shizuku_status_not_installed, Toast.LENGTH_LONG).show();
+                return;
+            }
+            ShizukuHelper.requestPermission();
+        });
+        shizukuPermissionListener = (requestCode, grantResult) -> {
+            Log.i("settings: shizuku permission result=%d", grantResult);
+            refreshShizukuStatus();
+            if (grantResult == 0 && Settings.preferShizuku(this)) {
+                ShizukuHelper.bindUserService(this);
+            }
+        };
+        ShizukuHelper.addPermissionListener(shizukuPermissionListener);
+        refreshShizukuStatus();
+        if (Settings.preferShizuku(this) && ShizukuHelper.isReady(this)) {
+            ShizukuHelper.bindUserService(this);
+        }
+
         // One-tap streaming presets. Persist like any other setting;
         // next connection applies them (same as manual radio changes).
         findViewById(R.id.preset_smooth).setOnClickListener(v ->
@@ -165,6 +205,30 @@ public final class SettingsActivity extends Activity {
         }
         ((CheckBox) findViewById(R.id.low_latency)).setChecked(Settings.lowLatency(this));
         ((CheckBox) findViewById(R.id.clipboard_sync)).setChecked(Settings.clipboardSync(this));
+        ((CheckBox) findViewById(R.id.root_capture_secure)).setChecked(Settings.rootCaptureSecure(this));
+        ((CheckBox) findViewById(R.id.prefer_shizuku)).setChecked(Settings.preferShizuku(this));
+        refreshShizukuStatus();
+    }
+
+    private void refreshShizukuStatus() {
+        TextView tv = findViewById(R.id.shizuku_status);
+        if (tv == null) return;
+        String label;
+        switch (ShizukuHelper.status(this)) {
+            case NOT_INSTALLED: label = getString(R.string.shizuku_status_not_installed); break;
+            case DEAD: label = getString(R.string.shizuku_status_dead); break;
+            case DENIED: label = getString(R.string.shizuku_status_denied); break;
+            case GRANTED: label = getString(R.string.shizuku_status_granted); break;
+            default: label = "?";
+        }
+        tv.setText(getString(R.string.shizuku_status, label + " (" + ShizukuHelper.detail(this) + ")"));
+    }
+
+    @Override protected void onDestroy() {
+        if (shizukuPermissionListener != null) {
+            ShizukuHelper.removePermissionListener(shizukuPermissionListener);
+        }
+        super.onDestroy();
     }
 
     @SuppressWarnings("deprecation")

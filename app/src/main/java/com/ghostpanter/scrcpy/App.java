@@ -9,6 +9,7 @@ public final class App extends Application {
 
     @Override
     public void onCreate() {
+        ShizukuHelper.ensureListener();
         super.onCreate();
         Crashlog.install(this);
     }
