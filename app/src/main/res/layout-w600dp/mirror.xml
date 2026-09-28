@@ -135,6 +135,29 @@
                 android:minWidth="120dp"
                 android:paddingHorizontal="@dimen/space_lg"
                 android:text="@string/disconnect"/>
+
+            <Button
+                android:id="@+id/ui_mode_cycle"
+                style="@style/Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:minHeight="@dimen/touch_min"
+                android:minWidth="120dp"
+                android:paddingHorizontal="@dimen/space_lg"
+                android:text="@string/ui_mode_cycle"/>
+
+            <Button
+                android:id="@+id/split_swap"
+                style="@style/Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:minHeight="@dimen/touch_min"
+                android:minWidth="120dp"
+                android:paddingHorizontal="@dimen/space_lg"
+                android:text="@string/split_swap"
+                android:visibility="gone"/>
         </LinearLayout>
 
         <!-- Semi-transparent keypad. clickable so touches stay local and are
@@ -290,6 +313,19 @@
         </LinearLayout>
 
     </FrameLayout>
+
+
+    <!-- Drag handle between preview and tools: drag horizontally to swap
+         Preview|Tools ↔ Tools|Preview (only those two layouts). -->
+    <View
+        android:id="@+id/split_handle"
+        android:layout_width="12dp"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_split_handle"
+        android:contentDescription="@string/split_swap_help"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"/>
 
     <include layout="@layout/tablet_tools"/>
 

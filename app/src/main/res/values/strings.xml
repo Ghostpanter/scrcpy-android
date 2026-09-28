@@ -84,6 +84,24 @@
     <string name="pairing">正在配对…</string>
     <string name="settings_apply_on_reconnect">更改将在下次连接时生效。</string>
     <string name="display">显示</string>
+
+    <string name="ui_mode">界面模式</string>
+    <string name="ui_mode_auto">自动（默认）</string>
+    <string name="ui_mode_phone">强制手机</string>
+    <string name="ui_mode_tablet">强制平板</string>
+    <string name="ui_mode_help">自动按屏幕最短边 ≥600dp 或 LARGE/XLARGE 判断。强制模式会显示/隐藏镜像侧工具栏，并影响未手动设置时的原生分辨率默认值。</string>
+    <string name="ui_mode_apply_hint">界面模式已保存；请重新打开镜像以生效。</string>
+    <string name="ui_mode_cycle">切换界面模式</string>
+    <string name="ui_mode_now_auto">已切换：自动</string>
+    <string name="ui_mode_now_phone">已切换：强制手机</string>
+    <string name="ui_mode_now_tablet">已切换：强制平板</string>
+
+    <string name="split_swap">交换左右布局</string>
+    <string name="split_swap_help">拖动中间分隔条可切换「预览|工具」与「工具|预览」。仅这两种布局。</string>
+    <string name="split_tools_left">工具栏在左侧</string>
+    <string name="split_now_preview_tools">布局：预览 | 工具</string>
+    <string name="split_now_tools_preview">布局：工具 | 预览</string>
+
     <string name="clipboard_sync">与目标设备同步剪贴板</string>
     <string name="no_devices_yet">尚未配对设备 — 填写配对地址与配对码后点「配对并保存」。</string>
 

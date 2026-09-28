@@ -15,7 +15,7 @@
     <dimen name="card_padding">16dp</dimen>
     <dimen name="touch_min">48dp</dimen>
 
-    <!-- Tablet tools pane (overridden on sw600dp / w600dp). -->
-    <dimen name="tools_pane_width">0dp</dimen>
+    <!-- Tools pane width when force-tablet on phone; overridden on sw600dp / w600dp. -->
+    <dimen name="tools_pane_width">320dp</dimen>
     <dimen name="tools_sidebar_width">140dp</dimen>
 </resources>

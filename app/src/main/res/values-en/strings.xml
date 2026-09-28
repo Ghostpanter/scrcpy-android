@@ -84,6 +84,24 @@
     <string name="pairing">Pairing…</string>
     <string name="settings_apply_on_reconnect">Changes apply on the next connection.</string>
     <string name="display">Display</string>
+
+    <string name="ui_mode">UI mode</string>
+    <string name="ui_mode_auto">Auto (default)</string>
+    <string name="ui_mode_phone">Force phone</string>
+    <string name="ui_mode_tablet">Force tablet</string>
+    <string name="ui_mode_help">Auto uses smallest width ≥600dp or LARGE/XLARGE. Force shows/hides the mirror tools pane and affects the native-resolution default when max size is unset.</string>
+    <string name="ui_mode_apply_hint">UI mode saved; reopen Mirror to apply.</string>
+    <string name="ui_mode_cycle">Switch UI mode</string>
+    <string name="ui_mode_now_auto">Switched: Auto</string>
+    <string name="ui_mode_now_phone">Switched: Force phone</string>
+    <string name="ui_mode_now_tablet">Switched: Force tablet</string>
+
+    <string name="split_swap">Swap left/right</string>
+    <string name="split_swap_help">Drag the divider to switch Preview|Tools and Tools|Preview. Those are the only two layouts.</string>
+    <string name="split_tools_left">Tools pane on the left</string>
+    <string name="split_now_preview_tools">Layout: Preview | Tools</string>
+    <string name="split_now_tools_preview">Layout: Tools | Preview</string>
+
     <string name="clipboard_sync">Sync clipboard with the target</string>
     <string name="no_devices_yet">No devices paired yet — fill pairing address and code, then tap Pair and save.</string>
 

@@ -28,25 +28,39 @@ public final class Ui {
     private Ui() {}
 
     /**
-     * Auto-detect tablet vs phone — single source of truth for mode-specific
-     * behavior (native {@code max_size} default, Mirror tools expectation, etc.).
-     * Resource qualifiers ({@code layout-sw600dp} / {@code layout-w600dp}) still
-     * choose which XML inflates; call sites should use this helper rather than
-     * re-reading {@link Configuration} ad hoc.
+     * Effective tablet vs phone mode — single source of truth for mode-specific
+     * behavior (native {@code max_size} default, Mirror tools pane, etc.).
      *
-     * <p>Treat as tablet when <b>any</b> of:
+     * <p>Honors {@link Settings#uiMode(Context)}:
      * <ul>
-     *   <li>{@code smallestScreenWidthDp >= 600} (primary; matches sw600dp layouts), or</li>
-     *   <li>{@link Configuration#SCREENLAYOUT_SIZE_LARGE} / {@code XLARGE}
-     *       (via {@link Configuration#SCREENLAYOUT_SIZE_MASK}).</li>
+     *   <li>{@link Settings#UI_MODE_PHONE} → always phone ({@code false})</li>
+     *   <li>{@link Settings#UI_MODE_TABLET} → always tablet ({@code true})</li>
+     *   <li>{@link Settings#UI_MODE_AUTO} (default) → {@link #detectTablet(Context)}</li>
      * </ul>
      *
-     * <p>Note: {@code layout-w600dp} may still inflate a tools pane on a phone in
-     * landscape (available width ≥ 600) even when this returns false. Mirror binds
-     * tools when the view exists, and logs a graceful fallback if tablet=true but
-     * {@code tools_pane} is missing.
+     * <p>Mirror shows/hides {@code tools_pane} from this result so force overrides
+     * change the UI even when resource qualifiers would disagree.
      */
     public static boolean isTablet(Context ctx) {
+        switch (Settings.uiMode(ctx)) {
+            case Settings.UI_MODE_PHONE:
+                return false;
+            case Settings.UI_MODE_TABLET:
+                return true;
+            default:
+                return detectTablet(ctx);
+        }
+    }
+
+    /**
+     * Hardware / configuration auto-detect (ignores Settings override).
+     * Treat as tablet when <b>any</b> of:
+     * <ul>
+     *   <li>{@code smallestScreenWidthDp >= 600} (primary; matches sw600dp), or</li>
+     *   <li>{@link Configuration#SCREENLAYOUT_SIZE_LARGE} / {@code XLARGE}.</li>
+     * </ul>
+     */
+    public static boolean detectTablet(Context ctx) {
         Configuration c = ctx.getResources().getConfiguration();
         if (c.smallestScreenWidthDp >= TABLET_SMALLEST_WIDTH_DP) {
             return true;
@@ -62,16 +76,29 @@ public final class Ui {
         return c.screenWidthDp >= TABLET_SMALLEST_WIDTH_DP;
     }
 
+    /** Short label for the persisted UI mode override. */
+    public static String uiModeLabel(Context ctx) {
+        switch (Settings.uiMode(ctx)) {
+            case Settings.UI_MODE_PHONE:
+                return "force-phone";
+            case Settings.UI_MODE_TABLET:
+                return "force-tablet";
+            default:
+                return "auto";
+        }
+    }
+
     /**
-     * Compact summary for logs: mode plus the Configuration fields that drove
-     * {@link #isTablet(Context)}.
+     * Compact summary for logs: effective mode, override, and Configuration fields.
      */
     public static String deviceModeSummary(Context ctx) {
         Configuration c = ctx.getResources().getConfiguration();
         int size = c.screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK;
         return String.format(Locale.US,
-                "mode=%s sw=%ddp w=%ddp h=%ddp screenLayoutSize=%d",
+                "mode=%s override=%s auto=%s sw=%ddp w=%ddp h=%ddp screenLayoutSize=%d",
                 isTablet(ctx) ? "tablet" : "phone",
+                uiModeLabel(ctx),
+                detectTablet(ctx) ? "tablet" : "phone",
                 c.smallestScreenWidthDp, c.screenWidthDp, c.screenHeightDp, size);
     }
 
