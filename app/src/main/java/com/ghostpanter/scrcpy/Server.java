@@ -871,7 +871,7 @@ public final class Server {
         String videoCodec = Settings.videoCodec(ctx);
         String audioCodec = Settings.audioCodec(ctx);
         int maxSize     = Settings.maxSize(ctx);
-        // Tablet split path: prefer controlled-device native resolution
+        // Tablet mode (Ui.isTablet): prefer controlled-device native resolution
         // (max_size=0) until the user explicitly picks a size in Settings.
         if (Ui.isTablet(ctx) && !Settings.prefs(ctx).contains(Settings.MAX_SIZE)) {
             maxSize = 0;

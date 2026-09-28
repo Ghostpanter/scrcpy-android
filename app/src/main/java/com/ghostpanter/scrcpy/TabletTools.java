@@ -33,7 +33,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 // Owns the tablet split-pane tools UI (file browser / app manager / device
-// debug). Bound from Mirror when layout-w600dp provides R.id.tools_pane.
+// debug / terminal). Bound from Mirror when layout-sw600dp or layout-w600dp
+// provides R.id.tools_pane (auto-detect + resource qualifiers).
 public final class TabletTools {
 
     static final int RQ_PUSH_FILE = 7101;

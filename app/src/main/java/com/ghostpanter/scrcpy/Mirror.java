@@ -182,8 +182,24 @@ public final class Mirror extends Activity {
         setupMirrorActions();
         updateStatusBar();
 
+        // Auto-detect tablet vs phone (Ui.isTablet), then enter mode.
+        // Split tools UI still comes from layout-sw600dp / layout-w600dp;
+        // if detection says tablet but tools_pane was not inflated, fall back.
+        boolean tabletMode = Ui.isTablet(this);
+        Log.i("mirror: auto-detect %s", Ui.deviceModeSummary(this));
         tabletTools = new TabletTools(this);
-        if (!tabletTools.bind()) tabletTools = null;
+        if (!tabletTools.bind()) {
+            tabletTools = null;
+            if (tabletMode) {
+                Log.w("mirror: tablet mode but tools_pane missing; falling back to phone chrome");
+            } else {
+                Log.i("mirror: phone mode — no tools sidebar");
+            }
+        } else if (tabletMode) {
+            Log.i("mirror: tablet mode — split tools pane active");
+        } else {
+            Log.i("mirror: wide layout tools_pane present (w>=600) while tablet=false");
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
