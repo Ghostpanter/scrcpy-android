@@ -104,6 +104,45 @@ public class SyncTest {
         }
     }
 
+    @Test
+    public void pullAssemblesPayload() throws Exception {
+        byte[] payload = new byte[]{1, 2, 3, 4, 5};
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        // DATA + DONE response from "server"
+        byte[] resp = new byte[8 + payload.length + 8];
+        resp[0] = 'D'; resp[1] = 'A'; resp[2] = 'T'; resp[3] = 'A';
+        Wire.writeLe32(resp, 4, payload.length);
+        System.arraycopy(payload, 0, resp, 8, payload.length);
+        int doneAt = 8 + payload.length;
+        resp[doneAt] = 'D'; resp[doneAt+1] = 'O'; resp[doneAt+2] = 'N'; resp[doneAt+3] = 'E';
+        Wire.writeLe32(resp, doneAt + 4, 0);
+
+        ByteArrayOutputStream dst = new ByteArrayOutputStream();
+        long total = Sync.pull(dst, wire, new ByteArrayInputStream(resp), PATH);
+        assertEquals(payload.length, total);
+        byte[] got = dst.toByteArray();
+        assertEquals(payload.length, got.length);
+        for (int i = 0; i < payload.length; i++) assertEquals(payload[i], got[i]);
+
+        byte[] sent = wire.toByteArray();
+        int pos = assertTag(sent, 0, "RECV");
+        byte[] path = PATH.getBytes(StandardCharsets.UTF_8);
+        assertEquals(path.length, Wire.readLe32(sent, pos)); pos += 4;
+        for (int i = 0; i < path.length; i++, pos++) assertEquals(path[i], sent[pos]);
+        assertEquals(sent.length, pos);
+    }
+
+    @Test
+    public void pullFailRaises() {
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        try {
+            Sync.pull(new ByteArrayOutputStream(), wire, failResponse("nope"), PATH);
+            fail("expected IOException");
+        } catch (IOException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("nope"));
+        }
+    }
+
     private static ByteArrayInputStream okayResponse() {
         byte[] r = new byte[8];
         r[0] = 'O'; r[1] = 'K'; r[2] = 'A'; r[3] = 'Y';

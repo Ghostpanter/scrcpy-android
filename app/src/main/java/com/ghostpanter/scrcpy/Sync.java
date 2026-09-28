@@ -6,10 +6,10 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
-// Pure-java adb sync v1 SEND framing. Extracted from Server.push() so
+// Pure-java adb sync v1 SEND/RECV framing. Extracted from Server.push() so
 // it can be unit-tested without an AdbStream or any android coupling.
 //
-// Layout on the wire (little-endian uint32 lengths):
+// SEND layout on the wire (little-endian uint32 lengths):
 //   "SEND" | u32(len(path,mode)) | path,mode
 //   "DATA" | u32(chunk_size)     | chunk_bytes      (repeats, chunk <= 64K)
 //   "DONE" | u32(mtime_seconds)
@@ -17,6 +17,12 @@ import java.util.Objects;
 //   "OKAY" | u32(0)
 //     or
 //   "FAIL" | u32(msg_len) | msg
+//
+// RECV layout:
+//   "RECV" | u32(len(path)) | path
+//   <--- "DATA" | u32(n) | bytes   (repeats)
+//   <--- "DONE" | u32(mtime)
+//     or "FAIL" | u32(msg_len) | msg
 public final class Sync {
 
     public static final int CHUNK = 64 * 1024;
@@ -92,6 +98,61 @@ public final class Sync {
         byte[] msg = new byte[len];
         if (msg.length > 0) Wire.readFully(in, msg);
         throw new IOException("sync FAIL: " + safeMessage(Wire.decodeUtf8(msg)));
+    }
+
+    // Pull remotePath into dst via adb sync RECV framing.
+    public static long pull(OutputStream dst, OutputStream out, InputStream in,
+            String remotePath) throws IOException {
+        Objects.requireNonNull(dst);
+        Objects.requireNonNull(out);
+        Objects.requireNonNull(in);
+        Objects.requireNonNull(remotePath);
+        if (remotePath.isEmpty() || remotePath.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("invalid sync path");
+        }
+        byte[] pathBytes = remotePath.getBytes(StandardCharsets.UTF_8);
+        if (pathBytes.length > MAX_PATH_BYTES) {
+            throw new IllegalArgumentException("sync path is too long");
+        }
+
+        byte[] req = new byte[8];
+        putTag(req, 0, "RECV");
+        Wire.writeLe32(req, 4, pathBytes.length);
+        out.write(req);
+        out.write(pathBytes);
+        out.flush();
+
+        byte[] hdr = new byte[8];
+        byte[] chunk = new byte[CHUNK];
+        long total = 0;
+        for (;;) {
+            Wire.readFully(in, hdr);
+            String code = new String(hdr, 0, 4, StandardCharsets.US_ASCII);
+            int len = Wire.readLe32(hdr, 4);
+            if ("DATA".equals(code)) {
+                if (len < 0 || len > CHUNK) {
+                    throw new IOException("sync DATA length out of range: " + len);
+                }
+                if (len > 0) {
+                    Wire.readFully(in, chunk, 0, len);
+                    dst.write(chunk, 0, len);
+                    total += len;
+                }
+                continue;
+            }
+            if ("DONE".equals(code)) {
+                return total;
+            }
+            if ("FAIL".equals(code)) {
+                if (len < 0 || len > MAX_FAIL_MSG) {
+                    throw new IOException("sync FAIL response length out of range: " + len);
+                }
+                byte[] msg = new byte[len];
+                if (msg.length > 0) Wire.readFully(in, msg);
+                throw new IOException("sync FAIL: " + safeMessage(Wire.decodeUtf8(msg)));
+            }
+            throw new IOException("unknown sync response: " + safeCode(code));
+        }
     }
 
     private static void putTag(byte[] dst, int off, String tag) {

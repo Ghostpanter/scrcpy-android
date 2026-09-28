@@ -1,5 +1,7 @@
 package com.ghostpanter.scrcpy;
 
+import android.content.Context;
+import android.content.res.Configuration;
 import android.annotation.SuppressLint;
 import android.graphics.Insets;
 import android.os.Build;
@@ -19,6 +21,18 @@ import android.view.WindowInsets;
 public final class Ui {
 
     private Ui() {}
+
+    /** Smallest-width ≥ 600dp (sw600dp / typical tablet). */
+    public static boolean isTablet(Context ctx) {
+        return ctx.getResources().getConfiguration().smallestScreenWidthDp >= 600;
+    }
+
+    /** Available width ≥ 600dp (w600dp), e.g. tablet or phone landscape. */
+    public static boolean isWide(Context ctx) {
+        Configuration c = ctx.getResources().getConfiguration();
+        return c.screenWidthDp >= 600;
+    }
+
 
     /** Pad root for status + navigation bars. */
     public static void padForSystemBars(View root) {

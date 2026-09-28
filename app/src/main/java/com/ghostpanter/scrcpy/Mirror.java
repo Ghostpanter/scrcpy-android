@@ -88,6 +88,9 @@ public final class Mirror extends Activity {
     private boolean mirrorMenuOpen;
     private boolean unlockPanelOpen;
 
+    // Present only when layout-w600dp/sw600dp includes tools_pane.
+    private TabletTools tabletTools;
+
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -179,6 +182,9 @@ public final class Mirror extends Activity {
         setupMirrorActions();
         updateStatusBar();
 
+        tabletTools = new TabletTools(this);
+        if (!tabletTools.bind()) tabletTools = null;
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackRequested);
@@ -198,6 +204,7 @@ public final class Mirror extends Activity {
                 runOnUiThread(() -> {
                     if (destroyed) return;
                     adb = a;
+                    if (tabletTools != null) tabletTools.setAdb(a);
                     if (session == null && currentSurface != null) {
                         startSession(currentSurface);
                     }
@@ -532,7 +539,10 @@ public final class Mirror extends Activity {
         }
         refreshMirrorActionsVisibility();
         if (state == State.CONNECTED) {
-            immersive();
+            // Keep system bars visible beside the tools pane so tablet
+            // controls stay reachable; phone full-screen still goes immersive.
+            if (tabletTools != null) showSystemBarsForStatus();
+            else immersive();
         } else {
             showSystemBarsForStatus();
         }
@@ -611,10 +621,21 @@ public final class Mirror extends Activity {
     // ---- lifecycle ----
 
     @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (tabletTools != null) tabletTools.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
     protected void onDestroy() {
         destroyed = true;
         sessionGeneration++;
         ui.removeCallbacksAndMessages(null);
+        if (tabletTools != null) {
+            tabletTools.destroy();
+            tabletTools = null;
+        }
         currentSurface = null;
         Session s = session;
         session = null;
@@ -631,7 +652,10 @@ public final class Mirror extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            if (state == State.CONNECTED) immersive();
+            if (state == State.CONNECTED) {
+                if (tabletTools != null) showSystemBarsForStatus();
+                else immersive();
+            }
             if (session != null) session.syncClipboard();
         }
     }

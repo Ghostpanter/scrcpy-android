@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ADB shell on the controlled device: command input, Run, scrollable output, Clear. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/SectionHeader"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/tools_terminal"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/terminal_help"
+        android:textColor="@color/on_surface_muted"
+        android:textSize="12sp"
+        android:paddingBottom="@dimen/space_sm"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/terminal_input"
+            style="@style/Field"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="@dimen/touch_min"
+            android:hint="@string/terminal_hint"
+            android:inputType="text|textNoSuggestions"
+            android:imeOptions="actionGo"
+            android:singleLine="true"
+            android:textColor="@color/on_surface"
+            android:textColorHint="@color/on_surface_muted"
+            android:textSize="13sp"
+            android:fontFamily="monospace"/>
+
+        <Button
+            android:id="@+id/terminal_run"
+            style="@style/Button.Primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_xs"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_md"
+            android:text="@string/terminal_run"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="@dimen/space_xs">
+
+        <TextView
+            android:id="@+id/terminal_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/terminal_status_ready"
+            android:textColor="@color/on_surface_muted"
+            android:textSize="12sp"/>
+
+        <Button
+            android:id="@+id/terminal_clear"
+            style="@style/Button.Secondary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_md"
+            android:text="@string/terminal_clear"/>
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/terminal_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="@dimen/space_sm"
+        android:fillViewport="true"
+        android:background="@color/surface_alt">
+
+        <TextView
+            android:id="@+id/terminal_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/space_sm"
+            android:textIsSelectable="true"
+            android:textColor="@color/on_surface"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:text=""/>
+    </ScrollView>
+</LinearLayout>
