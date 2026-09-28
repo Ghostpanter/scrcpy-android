@@ -111,9 +111,9 @@ echo "$actual_permissions" | grep -q "android.permission.INTERNET" \
     || { echo "build-apk: missing INTERNET permission" >&2; exit 1; }
 
 badging=$("$AAPT2" dump badging "$APK")
-echo "$badging" | grep -q "versionName='0.5.19-ghostpanter'" \
+echo "$badging" | grep -q "versionName='0.5.20-tablet'" \
     || { echo "build-apk: unexpected versionName" >&2; echo "$badging" | head -1 >&2; exit 1; }
-echo "$badging" | grep -q "minSdkVersion:'31'" \
+echo "$badging" | grep -q "minSdkVersion:'28'" \
     || { echo "build-apk: unexpected minSdk" >&2; exit 1; }
 echo "$badging" | grep -q "targetSdkVersion:'37'" \
     || { echo "build-apk: unexpected targetSdk" >&2; exit 1; }
