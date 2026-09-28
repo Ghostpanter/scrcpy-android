@@ -6,7 +6,6 @@ import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -42,8 +41,7 @@ public final class QrPair extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.qr_pair);
-        Ui.padForInsets(findViewById(R.id.root),
-                WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+        Ui.padForSystemBarsAndIme(findViewById(R.id.root));
 
         qrView = findViewById(R.id.qr_image);
         status = findViewById(R.id.qr_status);

@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.view.WindowInsets;
 import android.widget.CheckBox;
 import android.widget.Toast;
 import android.widget.RadioButton;
@@ -24,7 +23,7 @@ public final class SettingsActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(R.layout.settings);
-        Ui.padForInsets(findViewById(R.id.root), WindowInsets.Type.systemBars());
+        Ui.padForSystemBars(findViewById(R.id.root));
         showVersion();
 
         RadioGroup videoGroup   = findViewById(R.id.video_codec);
@@ -238,8 +237,9 @@ public final class SettingsActivity extends Activity {
     private void showVersion() {
         try {
             PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
-            ((TextView) findViewById(R.id.version)).setText(getString(
-                    R.string.version_format, info.versionName, info.getLongVersionCode()));
+            ((TextView) findViewById(R.id.version)).setText(
+                    getString(R.string.version_format, info.versionName, info.getLongVersionCode())
+                    + "\n" + getString(R.string.compat_requirements));
         } catch (PackageManager.NameNotFoundException e) {
             throw new IllegalStateException("installed package is missing", e);
         }

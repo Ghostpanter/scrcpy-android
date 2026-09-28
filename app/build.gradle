@@ -15,7 +15,7 @@ android {
     defaultConfig {
         // The published package id. Immutable across releases.
         applicationId 'com.ghostpanter.scrcpy'
-        minSdk 31
+        minSdk 28
         targetSdk 37
         versionCode 30
         versionName '0.5.19-ghostpanter'
@@ -45,8 +45,8 @@ android {
                 storePassword System.getenv('KEYSTORE_PASS')
                 keyAlias      System.getenv('KEY_ALIAS')
                 keyPassword   System.getenv('KEY_PASS')
-                // V1+V2: minSdk 31 only needs V2, but some OEM package
-                // installers still choke without JAR (V1) signatures.
+                // V1+V2: V2 is enough for modern installers, but some OEM
+                // package managers still choke without JAR (V1) signatures.
                 v1SigningEnabled true
                 v2SigningEnabled true
             }

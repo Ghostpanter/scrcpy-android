@@ -5,7 +5,6 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.WindowInsets;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -25,7 +24,7 @@ public final class LogViewerActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(R.layout.log_viewer);
-        Ui.padForInsets(findViewById(R.id.root), WindowInsets.Type.systemBars());
+        Ui.padForSystemBars(findViewById(R.id.root));
 
         logText = findViewById(R.id.log_text);
         logCount = findViewById(R.id.log_count);

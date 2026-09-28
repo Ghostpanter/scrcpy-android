@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-Updated: 2026-09-27 22:45 HKT (UTC+8)
+Updated: 2026-09-28 21:30 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 
@@ -27,10 +27,20 @@ Requirements for `assembleDebug`:
 | applicationId / namespace | `com.ghostpanter.scrcpy` |
 | versionName | `0.5-ghostpanter` |
 | versionCode | `6` |
-| minSdk | 31 |
+| minSdk | 28 (Android 9+) |
 | compileSdk / targetSdk | 37 |
 | Upstream | https://gitlab.com/0xlena/scrcpy-android (v0.5) |
 | License | Apache-2.0 (+ bundled notices) |
+
+## Controller vs controlled device (Android 9–17)
+
+| Role | Support |
+|------|---------|
+| **Controller** (this APK) | minSdk 28 / compile+target 37 — installable on Android 9–17 |
+| **Controlled** (mirrored) | Wireless debugging **pairing** UI: usually Android 11+; ADB TLS/STLS from Android 9; wired / already-paired per scrcpy-server |
+
+Feature gates on the controller: edge-to-edge / `WindowInsets.Type` (API 30+ with legacy fallbacks), typed foreground service (API 29+), `POST_NOTIFICATIONS` (API 33+), `NEARBY_WIFI_DEVICES` for NSD (API 33+; multicast path on older).
+
 
 ## Ghostpanter deltas vs upstream v0.5
 
@@ -63,7 +73,7 @@ the repo under `/workspace/secrets/`).
 | applicationId | `com.ghostpanter.scrcpy` |
 | versionName | `0.5.19-ghostpanter` |
 | versionCode | `30` |
-| minSdk | 31 (Android 12+) |
+| minSdk | 28 (Android 9–17; compile/target 37) |
 | ABIs | `arm64-v8a`, `x86_64` |
 
 **Upgrade notes**

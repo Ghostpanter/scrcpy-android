@@ -21,6 +21,7 @@
     <string name="notif_session_active">镜像进行中</string>
     <string name="settings">设置</string>
     <string name="version_format">版本 %1$s (%2$d)</string>
+    <string name="compat_requirements">控制端：Android 9–17。被控端：无线调试配对通常需 Android 11+；有线/已配对场景按 scrcpy-server 能力。</string>
     <string name="licenses">开源许可证</string>
     <string name="licenses_unavailable">无法加载许可证说明。</string>
     <string name="video_codec">视频编码</string>

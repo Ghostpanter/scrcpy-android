@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.os.Build;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
 
@@ -47,7 +48,13 @@ public final class Sessions extends Service {
                 .setContentIntent(reopenIntent(host, port))
                 .setOngoing(true)
                 .build();
-        startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        // 3-arg startForeground(type) is API 29+; required for typed FGS on
+        // targetSdk 34+. API 28 uses the 2-arg overload.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        } else {
+            startForeground(NOTIF_ID, n);
+        }
         return START_NOT_STICKY;
     }
 

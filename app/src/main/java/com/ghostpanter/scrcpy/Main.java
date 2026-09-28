@@ -8,7 +8,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.View;
-import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -59,8 +58,7 @@ public final class Main extends Activity {
         // nothing resizes it when the keyboard opens. The page is one
         // ScrollView, so padding the root keeps the form reachable behind
         // the keyboard.
-        Ui.padForInsets(findViewById(R.id.root),
-                WindowInsets.Type.systemBars() | WindowInsets.Type.ime());
+        Ui.padForSystemBarsAndIme(findViewById(R.id.root));
 
         pairAddress          = findViewById(R.id.pair_address);
         pairPort             = findViewById(R.id.pair_port);

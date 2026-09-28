@@ -4,13 +4,17 @@ Native Android client that mirrors and controls another Android device over
 Wireless debugging. It forwards video, audio, touch, keys, and clipboard data
 through the scrcpy server. Neither device needs root.
 
-The source device running this app needs Android 12 or newer. The target needs
-Android 11 or newer with Wireless debugging enabled.
+Controller (this APK): Android 9 through Android 17 (API 28–37).
+
+Controlled (mirrored) device: Wireless debugging pairing UI is typically
+Android 11+ on most OEMs. ADB TLS / STLS exists from Android 9; wired USB or
+already-paired wireless sessions follow scrcpy-server capabilities. Do not
+assume QR / pairing-code UI on Android 9–10 targets.
 
 
 Run
 ---
-Build requirements are JDK 17, Android SDK platform 36, and build-tools 35.
+Build requirements are JDK 17, Android SDK platform 37, and build-tools 37.
 
     ./scripts/update-server
     ./gradlew :app:assembleDebug

@@ -6,7 +6,7 @@
      some sizes. The list is a handful of rows; it does not need
      recycling.
 
-     Root padding is the base; Ui.padForInsets() adds the system bar and
+     Root padding is the base; Ui.padForSystemBarsAndIme() adds the system bar and
      IME insets to it at runtime (the window is edge-to-edge). -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"

@@ -9,7 +9,7 @@ android {
     namespace = "io.github.muntashirakon.adb"
 
     defaultConfig {
-        minSdk 31
+        minSdk 28
         targetSdk 36
     }
 

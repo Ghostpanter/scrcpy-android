@@ -6,10 +6,10 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
-import android.view.WindowInsets;
 import android.widget.ImageView;
 import android.widget.Toast;
 
@@ -23,7 +23,7 @@ public final class Donate extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(R.layout.activity_donate);
-        Ui.padForInsets(findViewById(R.id.root), WindowInsets.Type.systemBars());
+        Ui.padForSystemBars(findViewById(R.id.root));
         bindSave(R.id.donate_wechat, "donate_wechat.png");
         bindSave(R.id.donate_alipay, "donate_alipay.png");
     }
@@ -52,8 +52,13 @@ public final class Donate extends Activity {
         ContentValues values = new ContentValues();
         values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
         values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
-        values.put(MediaStore.Images.Media.RELATIVE_PATH,
-                Environment.DIRECTORY_PICTURES + "/scrcpy-android");
+        // RELATIVE_PATH is API 29+; on API 28 MediaStore still accepts insert
+        // into Images without it (WRITE_EXTERNAL_STORAGE was removed from the
+        // manifest, so save may fail on API 28 — toast reports that).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                    Environment.DIRECTORY_PICTURES + "/scrcpy-android");
+        }
         Uri uri = getContentResolver().insert(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
         if (uri == null) {

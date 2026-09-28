@@ -2,7 +2,6 @@ package com.ghostpanter.scrcpy;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.view.WindowInsets;
 import android.widget.TextView;
 
 import java.io.ByteArrayOutputStream;
@@ -27,7 +26,7 @@ public final class Licenses extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(R.layout.licenses);
-        Ui.padForInsets(findViewById(R.id.root), WindowInsets.Type.systemBars());
+        Ui.padForSystemBars(findViewById(R.id.root));
         ((TextView) findViewById(R.id.notices)).setText(read());
     }
 

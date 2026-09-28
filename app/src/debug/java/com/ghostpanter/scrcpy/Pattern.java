@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -27,6 +28,7 @@ public final class Pattern extends Activity {
             this::onClipboardChanged;
 
     @Override
+    @android.annotation.SuppressLint("NewApi")
     @SuppressWarnings("deprecation")
     protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -36,9 +38,19 @@ public final class Pattern extends Activity {
         setContentView(new PatternView());
         clipboard = getSystemService(ClipboardManager.class);
         if (clipboard != null) clipboard.addPrimaryClipChangedListener(clipboardListener);
-        getWindow().setDecorFitsSystemWindows(false);
-        WindowInsetsController insets = getWindow().getInsetsController();
-        if (insets != null) insets.hide(WindowInsets.Type.systemBars());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController insets = getWindow().getInsetsController();
+            if (insets != null) insets.hide(WindowInsets.Type.systemBars());
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+        }
     }
 
     @Override

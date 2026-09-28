@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Title lives in the layout, not in an action bar: the window is
-     edge-to-edge, so Ui.padForInsets() on this root is what keeps the
+     edge-to-edge, so Ui.padForSystemBars() on this root is what keeps the
      content clear of the system bars. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"

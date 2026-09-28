@@ -91,6 +91,8 @@ public final class Mirror extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
+    @SuppressLint("NewApi")
+    @SuppressWarnings("deprecation")
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(R.layout.mirror);
@@ -135,17 +137,26 @@ public final class Mirror extends Activity {
         // gesture area. A target gesture can then start on the mirrored
         // handle instead of being claimed by the source system.
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            int bottom = insets.getInsetsIgnoringVisibility(
-                    WindowInsets.Type.mandatorySystemGestures()).bottom;
-            Insets bars = insets.getInsetsIgnoringVisibility(
-                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            int bottom;
+            int top;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                bottom = insets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.mandatorySystemGestures()).bottom;
+                Insets bars = insets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                top = bars.top;
+            } else {
+                // API 28–29: approximate with system window insets.
+                bottom = insets.getSystemWindowInsetBottom();
+                top = insets.getSystemWindowInsetTop();
+            }
             boolean changed = false;
             if (gestureBottomInset != bottom) {
                 gestureBottomInset = bottom;
                 changed = true;
             }
-            if (systemTopInset != bars.top) {
-                systemTopInset = bars.top;
+            if (systemTopInset != top) {
+                systemTopInset = top;
                 changed = true;
             }
             if (changed) {
@@ -578,7 +589,7 @@ public final class Mirror extends Activity {
         if (session != null) session.onBack();
     }
 
-    // Pre-33 devices (minSdk is 31) still deliver Back this way. API 33+
+    // Pre-33 devices (minSdk is 28) still deliver Back this way. API 33+
     // uses the OnBackInvokedDispatcher callback registered in onCreate;
     // lint does not follow that version split.
     @Override
@@ -685,6 +696,7 @@ public final class Mirror extends Activity {
         startForegroundService(i);
     }
 
+    @SuppressLint("NewApi")
     @SuppressWarnings("deprecation")
     private void prepareEdgeToEdge() {
         // Without this the window stops at the cutout's safe area and the
@@ -692,52 +704,102 @@ public final class Mirror extends Activity {
         // sides of what is supposed to be a full-screen mirror. Only the
         // overlay controls are moved around a display cutout.
         WindowManager.LayoutParams lp = getWindow().getAttributes();
-        lp.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else {
+            // ALWAYS is API 30; SHORT_EDGES exists from API 28.
+            lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
         getWindow().setAttributes(lp);
-        getWindow().setDecorFitsSystemWindows(false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
     }
 
+    @SuppressLint("NewApi")
+    @SuppressWarnings("deprecation")
     private void immersive() {
-        WindowInsetsController c = getWindow().getInsetsController();
-        if (c != null) {
-            c.hide(WindowInsets.Type.systemBars());
-            c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            immersiveOk = true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                c.hide(WindowInsets.Type.systemBars());
+                c.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                immersiveOk = true;
+            } else {
+                immersiveOk = false;
+            }
         } else {
-            immersiveOk = false;
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+            immersiveOk = true;
         }
         applyLetterbox();
     }
 
+    @SuppressLint("NewApi")
+    @SuppressWarnings("deprecation")
     private void showSystemBarsForStatus() {
-        WindowInsetsController c = getWindow().getInsetsController();
-        if (c != null) {
-            c.show(WindowInsets.Type.systemBars());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController c = getWindow().getInsetsController();
+            if (c != null) {
+                c.show(WindowInsets.Type.systemBars());
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
         immersiveOk = false;
         applyLetterbox();
     }
 
+    @SuppressLint("NewApi")
+    @SuppressWarnings("deprecation")
     private void insetStatusBar() {
         int base = getResources().getDimensionPixelSize(R.dimen.space_sm);
         statusBar.setOnApplyWindowInsetsListener((view, windowInsets) -> {
             // While CONNECTING/DISCONNECTED the pill must clear both the
             // status bar and any display cutout — cutout-only left it under
             // the system status area on many devices.
-            Insets bars = windowInsets.getInsetsIgnoringVisibility(
-                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            int barL;
+            int barT;
+            int barR;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Insets bars = windowInsets.getInsetsIgnoringVisibility(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                barL = bars.left;
+                barT = bars.top;
+                barR = bars.right;
+            } else {
+                barL = windowInsets.getSystemWindowInsetLeft();
+                barT = windowInsets.getSystemWindowInsetTop();
+                barR = windowInsets.getSystemWindowInsetRight();
+            }
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
-            int left = base + bars.left;
-            int top = base + bars.top;
-            int right = base + bars.right;
+            int left = base + barL;
+            int top = base + barT;
+            int right = base + barR;
             if (lp.leftMargin != left || lp.topMargin != top
                     || lp.rightMargin != right || lp.bottomMargin != base) {
                 lp.setMargins(left, top, right, base);
                 view.setLayoutParams(lp);
             }
-            if (systemTopInset != bars.top) {
-                systemTopInset = bars.top;
+            if (systemTopInset != barT) {
+                systemTopInset = barT;
                 applyLetterbox();
             }
             return windowInsets;
