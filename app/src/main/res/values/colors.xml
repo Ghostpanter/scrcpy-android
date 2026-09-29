@@ -21,4 +21,6 @@
     <color name="pull_btn">#22C55E</color>
     <color name="folder_icon">#FF9800</color>
     <color name="on_push">#FFFFFF</color>
+    <color name="terminal_bg">#071018</color>
+    <color name="terminal_fg">#B6F0C0</color>
 </resources>

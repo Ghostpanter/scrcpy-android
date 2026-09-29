@@ -238,11 +238,13 @@
     <string name="tools_apps">软件管理</string>
     <string name="tools_debug">设备调试</string>
     <string name="tools_terminal">终端</string>
-    <string name="terminal_help">在被控端保持交互式 shell 会话（等同 adb shell）：输出实时滚动，输入回车发送；可用 Ctrl-C 中断。危险命令请谨慎。</string>
-    <string name="terminal_hint">输入命令后回车发送，如 uname -a</string>
+    <string name="terminal_title">交互式终端</string>
+    <string name="terminal_prompt">$</string>
+    <string name="terminal_help">实时交互式 shell 会话（非一次性执行）：上方为滚动控制台，下方输入回车/发送；Ctrl-C 中断，重连可重建会话。危险命令请谨慎。</string>
+    <string name="terminal_hint">在此输入，回车发送到被控端 shell</string>
     <string name="terminal_run">发送</string>
     <string name="terminal_clear">清空</string>
-    <string name="terminal_status_ready">未连接</string>
+    <string name="terminal_status_ready">● 未连接</string>
     <string name="terminal_status_running">执行中…</string>
     <string name="terminal_empty">请输入命令</string>
     <string name="terminal_error">终端错误：%1$s</string>
@@ -262,8 +264,8 @@
     <string name="files_push_ok">已传入：%1$s（%2$d 字节）</string>
     <string name="files_pull_ok">已传出：%1$s（%2$d 字节）</string>
     <string name="files_error">文件操作失败：%1$s</string>
-    <string name="terminal_status_connecting">正在连接 shell…</string>
-    <string name="terminal_status_connected">会话已连接</string>
+    <string name="terminal_status_connecting">● 连接中…</string>
+    <string name="terminal_status_connected">● 会话已连接</string>
     <string name="terminal_ctrl_c">Ctrl-C</string>
     <string name="terminal_reconnect">重连</string>
     <string name="terminal_session_started">—— shell 会话已启动 ——</string>

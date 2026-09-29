@@ -237,11 +237,13 @@
     <string name="tools_apps">App manager</string>
     <string name="tools_debug">Device debug</string>
     <string name="tools_terminal">Terminal</string>
-    <string name="terminal_help">Interactive shell session on the controlled device (same as adb shell): output streams live; Enter sends stdin. Use Ctrl-C to interrupt. Be careful with destructive commands.</string>
-    <string name="terminal_hint">Type a command and press Enter, e.g. uname -a</string>
+    <string name="terminal_title">Interactive terminal</string>
+    <string name="terminal_prompt">$</string>
+    <string name="terminal_help">Live interactive shell (not one-shot): scrollback console above, type below and Enter/Send; Ctrl-C interrupts; Reconnect restarts the session. Be careful with destructive commands.</string>
+    <string name="terminal_hint">Type here; Enter sends to the remote shell</string>
     <string name="terminal_run">Send</string>
     <string name="terminal_clear">Clear</string>
-    <string name="terminal_status_ready">Not connected</string>
+    <string name="terminal_status_ready">● Not connected</string>
     <string name="terminal_status_running">Running…</string>
     <string name="terminal_empty">Enter a command</string>
     <string name="terminal_error">Terminal error: %1$s</string>
@@ -261,8 +263,8 @@
     <string name="files_push_ok">Pushed: %1$s (%2$d bytes)</string>
     <string name="files_pull_ok">Pulled: %1$s (%2$d bytes)</string>
     <string name="files_error">File operation failed: %1$s</string>
-    <string name="terminal_status_connecting">Connecting shell…</string>
-    <string name="terminal_status_connected">Session connected</string>
+    <string name="terminal_status_connecting">● Connecting…</string>
+    <string name="terminal_status_connected">● Session live</string>
     <string name="terminal_ctrl_c">Ctrl-C</string>
     <string name="terminal_reconnect">Reconnect</string>
     <string name="terminal_session_started">—— shell session started ——</string>

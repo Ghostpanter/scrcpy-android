@@ -188,6 +188,10 @@ public final class TabletTools {
         navTerminal.setSelected(index == 3);
         if (index == 1 && allApps.isEmpty() && remote != null) refreshApps();
         if (index == 2 && lastSize == null && remote != null) refreshDebug();
+        if (index == 3 && remote != null) {
+            AdbRemote.ShellSession s = shellSession.get();
+            if (s == null || !s.isOpen()) startShellSession();
+        }
     }
 
     // ---- files ----

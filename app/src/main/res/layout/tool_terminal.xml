@@ -1,29 +1,137 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Interactive ADB shell on the controlled device: streaming session, stdin, Ctrl-C. -->
+<!-- Interactive ADB shell: console-first (scrollback + bottom input + Ctrl-C/Reconnect).
+     Intentionally distinct from the old one-shot EditText+Run form. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:padding="0dp">
 
-    <TextView
-        style="@style/SectionHeader"
+    <!-- Title + live session status -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/tools_terminal"/>
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="@dimen/space_xs">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/terminal_title"
+            android:textColor="@color/accent"
+            android:textStyle="bold"
+            android:textSize="15sp"/>
+
+        <TextView
+            android:id="@+id/terminal_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="@dimen/space_sm"
+            android:paddingVertical="2dp"
+            android:background="@drawable/bg_terminal_status"
+            android:text="@string/terminal_status_ready"
+            android:textColor="@color/on_surface"
+            android:textSize="11sp"/>
+    </LinearLayout>
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="@string/terminal_help"
         android:textColor="@color/on_surface_muted"
-        android:textSize="12sp"
-        android:paddingBottom="@dimen/space_sm"/>
+        android:textSize="11sp"
+        android:paddingBottom="@dimen/space_xs"/>
 
+    <!-- Session actions: always visible above the console -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:gravity="center_vertical"
+        android:paddingBottom="@dimen/space_xs">
+
+        <Button
+            android:id="@+id/terminal_ctrl_c"
+            style="@style/Button.Secondary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_xs"
+            android:text="@string/terminal_ctrl_c"
+            android:textSize="12sp"/>
+
+        <Button
+            android:id="@+id/terminal_reconnect"
+            style="@style/Button.Secondary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/space_xs"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_xs"
+            android:text="@string/terminal_reconnect"
+            android:textSize="12sp"/>
+
+        <Button
+            android:id="@+id/terminal_clear"
+            style="@style/Button.Secondary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/space_xs"
+            android:minHeight="@dimen/touch_min"
+            android:paddingHorizontal="@dimen/space_xs"
+            android:text="@string/terminal_clear"
+            android:textSize="12sp"/>
+    </LinearLayout>
+
+    <!-- Dominant scrollback console (looks like a real terminal, not a form) -->
+    <ScrollView
+        android:id="@+id/terminal_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:background="@drawable/bg_terminal_console"
+        android:fadeScrollbars="false">
+
+        <TextView
+            android:id="@+id/terminal_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="@dimen/space_sm"
+            android:minHeight="160dp"
+            android:textIsSelectable="true"
+            android:textColor="@color/terminal_fg"
+            android:textSize="12sp"
+            android:lineSpacingExtra="2dp"
+            android:fontFamily="monospace"
+            android:text=""/>
+    </ScrollView>
+
+    <!-- Bottom input row: prompt + field + Send (classic shell chrome) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="@dimen/space_xs"
+        android:paddingTop="@dimen/space_xs"
+        android:background="@color/surface_alt">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="@dimen/space_sm"
+            android:paddingEnd="@dimen/space_xs"
+            android:text="@string/terminal_prompt"
+            android:textColor="@color/accent"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:fontFamily="monospace"/>
 
         <EditText
             android:id="@+id/terminal_input"
@@ -36,6 +144,7 @@
             android:inputType="text|textNoSuggestions"
             android:imeOptions="actionGo"
             android:singleLine="true"
+            android:background="@android:color/transparent"
             android:textColor="@color/on_surface"
             android:textColorHint="@color/on_surface_muted"
             android:textSize="13sp"
@@ -51,71 +160,4 @@
             android:paddingHorizontal="@dimen/space_md"
             android:text="@string/terminal_run"/>
     </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="@dimen/space_xs">
-
-        <TextView
-            android:id="@+id/terminal_status"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/terminal_status_ready"
-            android:textColor="@color/on_surface_muted"
-            android:textSize="12sp"/>
-
-        <Button
-            android:id="@+id/terminal_ctrl_c"
-            style="@style/Button.Secondary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="@dimen/space_xs"
-            android:minHeight="@dimen/touch_min"
-            android:paddingHorizontal="@dimen/space_sm"
-            android:text="@string/terminal_ctrl_c"/>
-
-        <Button
-            android:id="@+id/terminal_reconnect"
-            style="@style/Button.Secondary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="@dimen/space_xs"
-            android:minHeight="@dimen/touch_min"
-            android:paddingHorizontal="@dimen/space_sm"
-            android:text="@string/terminal_reconnect"/>
-
-        <Button
-            android:id="@+id/terminal_clear"
-            style="@style/Button.Secondary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/touch_min"
-            android:paddingHorizontal="@dimen/space_md"
-            android:text="@string/terminal_clear"/>
-    </LinearLayout>
-
-    <ScrollView
-        android:id="@+id/terminal_scroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="@dimen/space_sm"
-        android:fillViewport="true"
-        android:background="@color/surface_alt">
-
-        <TextView
-            android:id="@+id/terminal_output"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:padding="@dimen/space_sm"
-            android:textIsSelectable="true"
-            android:textColor="@color/on_surface"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:text=""/>
-    </ScrollView>
 </LinearLayout>

@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-## ColorOS install compatibility (0.5.24-tablet / vc35)
+## ColorOS install compatibility (0.5.25-tablet / vc36)
 
 ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when
 `apksigner verify` succeeded. Changes in this release aimed at that:
@@ -22,14 +22,15 @@ apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
 # expect: Verified using v1 scheme: true  AND  v2 scheme: true
 ```
 
-### 0.5.24-tablet tool upgrades
+### 0.5.25-tablet terminal UX
 
-- File browser **传出到本机**: pulls the selected remote file into the controller’s
-  public `Download` folder via MediaStore (API 29+); long-press still opens SAF Save As.
-  **传入** unchanged (SAF document picker → adb push into current remote dir).
-- Terminal: persistent interactive `shell:` session with streaming stdout, stdin Send,
-  Ctrl-C (0x03), and Reconnect. Not a full PTY on all adbd builds (no reliable resize /
-  curses); better than one-shot `shell:<cmd>`.
+- Terminal pane is **console-first** (large green-on-black scrollback, `$` input row at
+  the bottom, full-width **Ctrl-C / 重连 / 清空** toolbar, live session pill). 0.5.24
+  already had the interactive `shell:` session code, but the layout still looked like
+  the old one-shot EditText+Run form — users reported “no visible change”.
+- Behavior unchanged in spirit: persistent `shell:` session, Enter/Send stdin, Ctrl-C
+  (0x03), Reconnect; session also starts when the 终端 tab is selected.
+- File browser pull-to-Download from 0.5.24 kept. Phone mode untouched.
 
 ### Install on ColorOS (if UI says 无法安装)
 
