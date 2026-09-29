@@ -16,9 +16,9 @@ android {
         // The published package id. Immutable across releases.
         applicationId 'com.ghostpanter.scrcpy'
         minSdk 28
-        targetSdk 37
-        versionCode 31
-        versionName '0.5.20-tablet'
+        targetSdk 34
+        versionCode 32
+        versionName '0.5.21-tablet-coloros'
     }
 
     // AGP otherwise embeds a Google-signed dependency-metadata blob in the
