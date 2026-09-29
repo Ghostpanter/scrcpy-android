@@ -1,10 +1,14 @@
 package com.ghostpanter.scrcpy;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -19,14 +23,18 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.MimeTypeMap;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ListView;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.nio.charset.StandardCharsets;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -94,15 +102,20 @@ public final class TabletTools {
     private AdbRemote.DisplaySize lastSize;
     private AdbRemote.DisplayDensity lastDpi;
 
-    // Terminal (interactive streaming shell session)
+    // Terminal (ssh-pad-like UX over adb interactive shell:)
     private EditText terminalInput;
-    private TextView terminalOutput, terminalStatus;
+    private TextView terminalOutput, terminalStatus, terminalTitle;
+    private View terminalStatusDot;
+    private TextView terminalKeyCtrl, terminalKeyAlt, terminalKbdBtn;
     private ScrollView terminalScroll;
     private final StringBuilder terminalLog = new StringBuilder();
     private static final int TERMINAL_MAX_CHARS = 200_000;
     private final AtomicReference<AdbRemote.ShellSession> shellSession = new AtomicReference<>();
     private final Object shellStartLock = new Object();
     private final AtomicInteger shellGen = new AtomicInteger();
+    private boolean terminalCtrlSticky;
+    private boolean terminalAltSticky;
+    private boolean terminalSoftImeForced;
 
     public TabletTools(Activity activity) {
         this.activity = activity;
@@ -143,8 +156,8 @@ public final class TabletTools {
             refreshApps();
             refreshDebug();
             startShellSession();
-        } else if (terminalStatus != null) {
-            terminalStatus.setText(R.string.files_need_connection);
+        } else {
+            setTerminalPhase(PHASE_IDLE, activity.getString(R.string.files_need_connection));
         }
     }
 
@@ -723,23 +736,38 @@ public final class TabletTools {
 
     // ---- helpers ----
 
-    // ---- terminal (interactive streaming session) ----
+    // ---- terminal (ssh-pad-flutter UX over adb shell:) ----
 
     private void bindTerminal() {
         terminalInput = activity.findViewById(R.id.terminal_input);
         terminalOutput = activity.findViewById(R.id.terminal_output);
         terminalStatus = activity.findViewById(R.id.terminal_status);
+        terminalTitle = activity.findViewById(R.id.terminal_title);
+        terminalStatusDot = activity.findViewById(R.id.terminal_status_dot);
         terminalScroll = activity.findViewById(R.id.terminal_scroll);
+        terminalKeyCtrl = activity.findViewById(R.id.terminal_key_ctrl);
+        terminalKeyAlt = activity.findViewById(R.id.terminal_key_alt);
+        terminalKbdBtn = activity.findViewById(R.id.terminal_kbd);
 
-        activity.findViewById(R.id.terminal_run).setOnClickListener(v -> sendTerminalLine());
-        activity.findViewById(R.id.terminal_clear).setOnClickListener(v -> clearTerminal());
-        View ctrl = activity.findViewById(R.id.terminal_ctrl_c);
-        if (ctrl != null) ctrl.setOnClickListener(v -> sendTerminalInterrupt());
-        View reconnect = activity.findViewById(R.id.terminal_reconnect);
-        if (reconnect != null) reconnect.setOnClickListener(v -> {
-            closeShellSession();
-            startShellSession();
-        });
+        View run = activity.findViewById(R.id.terminal_run);
+        if (run != null) run.setOnClickListener(v -> sendTerminalLine());
+        View disconnect = activity.findViewById(R.id.terminal_disconnect);
+        if (disconnect != null) disconnect.setOnClickListener(v -> disconnectTerminal());
+        View more = activity.findViewById(R.id.terminal_more);
+        if (more != null) more.setOnClickListener(this::showTerminalMenu);
+        if (terminalKbdBtn != null) {
+            terminalKbdBtn.setOnClickListener(v -> toggleSoftKeyboard());
+        }
+        View scroll = terminalScroll;
+        if (scroll != null) {
+            scroll.setOnClickListener(v -> summonSoftKeyboard());
+        }
+        if (terminalOutput != null) {
+            terminalOutput.setOnClickListener(v -> summonSoftKeyboard());
+        }
+
+        bindExtraKeys();
+
         terminalInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
@@ -749,26 +777,214 @@ public final class TabletTools {
             }
             return false;
         });
+        setTerminalPhase(PHASE_IDLE, activity.getString(R.string.terminal_status_ready));
         if (remote != null) startShellSession();
-        else terminalStatus.setText(R.string.files_need_connection);
+        else setTerminalPhase(PHASE_IDLE, activity.getString(R.string.files_need_connection));
+    }
+
+    private void bindExtraKeys() {
+        setExtraKey(R.id.terminal_key_kbd, v -> toggleSoftKeyboard());
+        setExtraKey(R.id.terminal_key_esc, v -> sendTerminalBytes(new byte[]{0x1b}));
+        setExtraKey(R.id.terminal_key_tab, v -> sendTerminalBytes(new byte[]{0x09}));
+        if (terminalKeyCtrl != null) {
+            terminalKeyCtrl.setOnClickListener(v -> {
+                terminalCtrlSticky = !terminalCtrlSticky;
+                refreshModKeys();
+            });
+        }
+        if (terminalKeyAlt != null) {
+            terminalKeyAlt.setOnClickListener(v -> {
+                terminalAltSticky = !terminalAltSticky;
+                refreshModKeys();
+            });
+        }
+        setExtraKey(R.id.terminal_key_up, v -> sendAnsi("\u001b[A"));
+        setExtraKey(R.id.terminal_key_down, v -> sendAnsi("\u001b[B"));
+        setExtraKey(R.id.terminal_key_right, v -> sendAnsi("\u001b[C"));
+        setExtraKey(R.id.terminal_key_left, v -> sendAnsi("\u001b[D"));
+        setExtraKey(R.id.terminal_key_home, v -> sendAnsi("\u001b[H"));
+        setExtraKey(R.id.terminal_key_end, v -> sendAnsi("\u001b[F"));
+        setExtraKey(R.id.terminal_key_ctrl_c, v -> sendTerminalInterrupt());
+        setExtraKey(R.id.terminal_key_ctrl_d, v -> sendCtrlLetter('D'));
+        setExtraKey(R.id.terminal_key_ctrl_z, v -> sendCtrlLetter('Z'));
+        setExtraKey(R.id.terminal_key_pipe, v -> sendOrInsert("|"));
+        setExtraKey(R.id.terminal_key_tilde, v -> sendOrInsert("~"));
+        // Also wire legacy id if present in older inflates (no-op when missing).
+        View legacyCtrlC = activity.findViewById(R.id.terminal_key_ctrl_c);
+        if (legacyCtrlC == null) {
+            View old = activity.findViewById(getIdQuiet("terminal_ctrl_c"));
+            if (old != null) old.setOnClickListener(v -> sendTerminalInterrupt());
+        }
+    }
+
+    private int getIdQuiet(String name) {
+        return activity.getResources().getIdentifier(name, "id", activity.getPackageName());
+    }
+
+    private void setExtraKey(int id, View.OnClickListener listener) {
+        View v = activity.findViewById(id);
+        if (v != null) v.setOnClickListener(listener);
+    }
+
+    private void refreshModKeys() {
+        styleModKey(terminalKeyCtrl, terminalCtrlSticky);
+        styleModKey(terminalKeyAlt, terminalAltSticky);
+        if (terminalKbdBtn != null) {
+            terminalKbdBtn.setTextColor(activity.getColor(
+                    terminalSoftImeForced ? R.color.terminal_accent : R.color.terminal_fg));
+        }
+        View extraKbd = activity.findViewById(R.id.terminal_key_kbd);
+        if (extraKbd instanceof TextView) {
+            TextView tv = (TextView) extraKbd;
+            tv.setBackgroundResource(terminalSoftImeForced
+                    ? R.drawable.bg_terminal_key_active
+                    : R.drawable.bg_terminal_key);
+            tv.setTextColor(activity.getColor(
+                    terminalSoftImeForced ? R.color.terminal_accent : R.color.terminal_fg));
+        }
+    }
+
+    private void styleModKey(TextView key, boolean active) {
+        if (key == null) return;
+        key.setBackgroundResource(active
+                ? R.drawable.bg_terminal_key_active
+                : R.drawable.bg_terminal_key);
+        key.setTextColor(activity.getColor(
+                active ? R.color.terminal_accent : R.color.terminal_fg));
+    }
+
+    private void clearMods() {
+        if (terminalCtrlSticky || terminalAltSticky) {
+            terminalCtrlSticky = false;
+            terminalAltSticky = false;
+            refreshModKeys();
+        }
+    }
+
+    private static final int PHASE_IDLE = 0;
+    private static final int PHASE_CONNECTING = 1;
+    private static final int PHASE_CONNECTED = 2;
+    private static final int PHASE_ERROR = 3;
+
+    private void setTerminalPhase(int phase, String label) {
+        if (terminalStatus != null) {
+            terminalStatus.setText(label);
+            int color = R.color.terminal_status_idle;
+            if (phase == PHASE_CONNECTING) color = R.color.terminal_status_connecting;
+            else if (phase == PHASE_CONNECTED) color = R.color.terminal_status_connected;
+            else if (phase == PHASE_ERROR) color = R.color.terminal_status_error;
+            terminalStatus.setTextColor(activity.getColor(color));
+            if (terminalStatusDot != null) {
+                GradientDrawable dot = new GradientDrawable();
+                dot.setShape(GradientDrawable.OVAL);
+                dot.setColor(activity.getColor(color));
+                terminalStatusDot.setBackground(dot);
+            }
+        }
+        if (terminalTitle != null && phase == PHASE_CONNECTED) {
+            // Keep short title; status line carries detail.
+            terminalTitle.setText(R.string.terminal_title);
+        }
+    }
+
+    private void showTerminalMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(activity, anchor);
+        menu.getMenu().add(0, 1, 0, R.string.terminal_menu_kbd);
+        menu.getMenu().add(0, 2, 1, R.string.terminal_menu_paste);
+        menu.getMenu().add(0, 3, 2, R.string.terminal_menu_clear);
+        menu.getMenu().add(0, 4, 3, R.string.terminal_menu_reconnect);
+        menu.getMenu().add(0, 5, 4, R.string.terminal_menu_disconnect);
+        menu.setOnMenuItemClickListener(item -> {
+            int id = item.getItemId();
+            if (id == 1) toggleSoftKeyboard();
+            else if (id == 2) pasteIntoTerminal();
+            else if (id == 3) clearTerminal();
+            else if (id == 4) {
+                closeShellSession();
+                startShellSession();
+            } else if (id == 5) disconnectTerminal();
+            return true;
+        });
+        menu.show();
+    }
+
+    private void toggleSoftKeyboard() {
+        terminalSoftImeForced = !terminalSoftImeForced;
+        refreshModKeys();
+        if (terminalSoftImeForced) summonSoftKeyboard();
+        else hideSoftKeyboard();
+    }
+
+    private void summonSoftKeyboard() {
+        if (terminalInput == null) return;
+        terminalInput.requestFocus();
+        InputMethodManager imm = (InputMethodManager)
+                activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(terminalInput, InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    private void hideSoftKeyboard() {
+        if (terminalInput == null) return;
+        InputMethodManager imm = (InputMethodManager)
+                activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(terminalInput.getWindowToken(), 0);
+        }
+    }
+
+    private void pasteIntoTerminal() {
+        ClipboardManager cm = (ClipboardManager)
+                activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm == null || !cm.hasPrimaryClip()) {
+            toast(R.string.terminal_paste_empty);
+            return;
+        }
+        ClipData clip = cm.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            toast(R.string.terminal_paste_empty);
+            return;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(activity);
+        if (text == null || text.length() == 0) {
+            toast(R.string.terminal_paste_empty);
+            return;
+        }
+        String s = text.toString();
+        // Multi-line paste: send as raw stdin (ssh-pad pastes into PTY).
+        if (s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
+            sendTerminalRaw(s.replace("\r\n", "\n").replace('\r', '\n'));
+        } else if (terminalInput != null) {
+            int start = Math.max(terminalInput.getSelectionStart(), 0);
+            int end = Math.max(terminalInput.getSelectionEnd(), 0);
+            terminalInput.getText().replace(Math.min(start, end), Math.max(start, end), s);
+        }
+    }
+
+    private void disconnectTerminal() {
+        closeShellSession();
+        setTerminalPhase(PHASE_IDLE, activity.getString(R.string.terminal_session_ended));
+        appendTerminal("\n[" + activity.getString(R.string.terminal_session_ended) + "]\n");
     }
 
     private void clearTerminal() {
         terminalLog.setLength(0);
-        terminalOutput.setText("");
+        if (terminalOutput != null) terminalOutput.setText("");
         AdbRemote.ShellSession s = shellSession.get();
-        terminalStatus.setText(s != null && s.isOpen()
-                ? R.string.terminal_status_connected
-                : R.string.terminal_status_ready);
+        if (s != null && s.isOpen()) {
+            setTerminalPhase(PHASE_CONNECTED,
+                    activity.getString(R.string.terminal_status_connected_live));
+        } else {
+            setTerminalPhase(PHASE_IDLE, activity.getString(R.string.terminal_status_ready));
+        }
     }
 
     private void startShellSession() {
         if (destroyed.get()) return;
         AdbRemote r = remote;
         if (r == null) {
-            if (terminalStatus != null) {
-                terminalStatus.setText(R.string.files_need_connection);
-            }
+            setTerminalPhase(PHASE_IDLE, activity.getString(R.string.files_need_connection));
             return;
         }
         io.execute(() -> {
@@ -779,8 +995,9 @@ public final class TabletTools {
                 closeShellSessionLocked();
                 final int gen = shellGen.get();
                 ui.post(() -> {
-                    if (!destroyed.get() && terminalStatus != null) {
-                        terminalStatus.setText(R.string.terminal_status_connecting);
+                    if (!destroyed.get()) {
+                        setTerminalPhase(PHASE_CONNECTING,
+                                activity.getString(R.string.terminal_status_connecting));
                     }
                 });
                 try {
@@ -807,12 +1024,13 @@ public final class TabletTools {
                                         if (reason != null && !reason.isEmpty()) {
                                             appendTerminal("\n[" + activity.getString(
                                                     R.string.terminal_session_closed, reason) + "]\n");
-                                            terminalStatus.setText(activity.getString(
+                                            setTerminalPhase(PHASE_ERROR, activity.getString(
                                                     R.string.terminal_session_closed, reason));
                                         } else {
                                             appendTerminal("\n[" + activity.getString(
                                                     R.string.terminal_session_ended) + "]\n");
-                                            terminalStatus.setText(R.string.terminal_status_ready);
+                                            setTerminalPhase(PHASE_IDLE,
+                                                    activity.getString(R.string.terminal_status_ready));
                                         }
                                     });
                                 }
@@ -821,13 +1039,15 @@ public final class TabletTools {
                     shellSession.set(session);
                     ui.post(() -> {
                         if (destroyed.get()) return;
-                        terminalStatus.setText(R.string.terminal_status_connected);
+                        setTerminalPhase(PHASE_CONNECTED,
+                                activity.getString(R.string.terminal_status_connected_live));
                         appendTerminal(activity.getString(R.string.terminal_session_started) + "\n");
                     });
                 } catch (Exception e) {
                     ui.post(() -> {
                         if (destroyed.get()) return;
-                        terminalStatus.setText(activity.getString(R.string.terminal_error, msg(e)));
+                        setTerminalPhase(PHASE_ERROR,
+                                activity.getString(R.string.terminal_error, msg(e)));
                         appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
                     });
                 }
@@ -853,17 +1073,39 @@ public final class TabletTools {
         if (!ensureRemote()) return;
         String raw = terminalInput.getText() == null ? "" : terminalInput.getText().toString();
         String cmd = sanitizeTerminalCommand(raw);
-        // Allow empty Enter (just newline) for interactive prompts.
         AdbRemote.ShellSession s = shellSession.get();
         if (s == null || !s.isOpen()) {
             startShellSession();
             toast(R.string.terminal_status_connecting);
             return;
         }
-        final String toSend = cmd + "\n";
-        appendTerminal("> " + cmd + "\n");
+        // Sticky Ctrl + single letter → control character (ssh-pad ExtraKeys feel).
+        if (terminalCtrlSticky && cmd.length() == 1) {
+            char ch = Character.toUpperCase(cmd.charAt(0));
+            if (ch >= '@' && ch <= '_') {
+                sendCtrlLetter(ch);
+                terminalInput.setText("");
+                return;
+            }
+        }
+        final String toSend;
+        if (terminalAltSticky && !cmd.isEmpty()) {
+            // ESC-prefix each character (common readline meta binding).
+            StringBuilder sb = new StringBuilder(cmd.length() * 2 + 1);
+            for (int i = 0; i < cmd.length(); i++) {
+                sb.append((char) 0x1b).append(cmd.charAt(i));
+            }
+            sb.append('\n');
+            toSend = sb.toString();
+        } else {
+            toSend = cmd + "\n";
+        }
+        // Local echo of the command line (adb shell often has no PTY echo).
+        appendTerminal(cmd + "\n");
         terminalInput.setText("");
-        terminalStatus.setText(R.string.terminal_status_connected);
+        clearMods();
+        setTerminalPhase(PHASE_CONNECTED,
+                activity.getString(R.string.terminal_status_connected_live));
         io.execute(() -> {
             try {
                 s.write(toSend);
@@ -871,10 +1113,61 @@ public final class TabletTools {
                 ui.post(() -> {
                     if (destroyed.get()) return;
                     appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
-                    terminalStatus.setText(activity.getString(R.string.terminal_error, msg(e)));
-                    // Session likely dead; try to reopen.
+                    setTerminalPhase(PHASE_ERROR,
+                            activity.getString(R.string.terminal_error, msg(e)));
                     closeShellSession();
                     startShellSession();
+                });
+            }
+        });
+    }
+
+    private void sendOrInsert(String token) {
+        if (terminalInput != null && terminalInput.hasFocus()
+                && terminalInput.getText() != null
+                && terminalInput.getText().length() > 0) {
+            int start = Math.max(terminalInput.getSelectionStart(), 0);
+            int end = Math.max(terminalInput.getSelectionEnd(), 0);
+            terminalInput.getText().replace(Math.min(start, end), Math.max(start, end), token);
+            return;
+        }
+        sendTerminalRaw(token);
+    }
+
+    private void sendAnsi(String seq) {
+        sendTerminalRaw(seq);
+        clearMods();
+    }
+
+    private void sendCtrlLetter(char letter) {
+        char upper = Character.toUpperCase(letter);
+        byte ctrl = (byte) (upper & 0x1f);
+        sendTerminalBytes(new byte[]{ctrl});
+        clearMods();
+    }
+
+    private void sendTerminalRaw(String text) {
+        if (text == null || text.isEmpty()) return;
+        sendTerminalBytes(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void sendTerminalBytes(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return;
+        if (!ensureRemote()) return;
+        AdbRemote.ShellSession s = shellSession.get();
+        if (s == null || !s.isOpen()) {
+            startShellSession();
+            toast(R.string.terminal_status_connecting);
+            return;
+        }
+        clearMods();
+        io.execute(() -> {
+            try {
+                s.writeBytes(bytes);
+            } catch (Exception e) {
+                ui.post(() -> {
+                    if (destroyed.get()) return;
+                    appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
                 });
             }
         });
@@ -886,7 +1179,8 @@ public final class TabletTools {
             toast(R.string.files_need_connection);
             return;
         }
-        appendTerminal("^C\n");
+        appendTerminal("^C");
+        clearMods();
         io.execute(() -> {
             try {
                 s.sendInterrupt();
@@ -903,8 +1197,6 @@ public final class TabletTools {
     private static String sanitizeTerminalCommand(String raw) {
         if (raw == null) return "";
         String s = raw;
-        // Only strip leading/trailing whitespace for prefix detection; preserve
-        // intentional trailing spaces after the command body is extracted.
         String trimmed = s.trim();
         if (trimmed.regionMatches(true, 0, "adb shell ", 0, 10)) {
             s = trimmed.substring(10);
@@ -929,7 +1221,9 @@ public final class TabletTools {
         if (terminalLog.length() > TERMINAL_MAX_CHARS) {
             terminalLog.delete(0, terminalLog.length() - TERMINAL_MAX_CHARS);
         }
-        terminalOutput.setText(terminalLog.toString());
+        if (terminalOutput != null) {
+            terminalOutput.setText(terminalLog.toString());
+        }
         if (terminalScroll != null) {
             terminalScroll.post(() -> terminalScroll.fullScroll(View.FOCUS_DOWN));
         }

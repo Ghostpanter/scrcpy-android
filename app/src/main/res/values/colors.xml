@@ -21,6 +21,17 @@
     <color name="pull_btn">#22C55E</color>
     <color name="folder_icon">#FF9800</color>
     <color name="on_push">#FFFFFF</color>
-    <color name="terminal_bg">#071018</color>
-    <color name="terminal_fg">#B6F0C0</color>
+    <!-- Primer-dark terminal (ssh-pad-flutter / xterm canvas) -->
+    <color name="terminal_bg">#0D1117</color>
+    <color name="terminal_fg">#E6EDF3</color>
+    <color name="terminal_toolbar">#161B22</color>
+    <color name="terminal_key_bg">#21262D</color>
+    <color name="terminal_border">#30363D</color>
+    <color name="terminal_muted">#8B949E</color>
+    <color name="terminal_accent">#2F81F7</color>
+    <color name="terminal_key_active_bg">#382F81F7</color>
+    <color name="terminal_status_connected">#3FB950</color>
+    <color name="terminal_status_connecting">#D29922</color>
+    <color name="terminal_status_error">#F85149</color>
+    <color name="terminal_status_idle">#8B949E</color>
 </resources>

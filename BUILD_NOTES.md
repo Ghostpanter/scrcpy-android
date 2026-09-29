@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-## ColorOS install compatibility (0.5.25-tablet / vc36)
+## ColorOS install compatibility (0.5.26-tablet / vc37)
 
 ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when
 `apksigner verify` succeeded. Changes in this release aimed at that:
@@ -22,15 +22,21 @@ apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
 # expect: Verified using v1 scheme: true  AND  v2 scheme: true
 ```
 
-### 0.5.25-tablet terminal UX
+### 0.5.26-tablet terminal UX (ssh-pad aligned)
 
-- Terminal pane is **console-first** (large green-on-black scrollback, `$` input row at
-  the bottom, full-width **Ctrl-C / 重连 / 清空** toolbar, live session pill). 0.5.24
-  already had the interactive `shell:` session code, but the layout still looked like
-  the old one-shot EditText+Run form — users reported “no visible change”.
-- Behavior unchanged in spirit: persistent `shell:` session, Enter/Send stdin, Ctrl-C
-  (0x03), Reconnect; session also starts when the 终端 tab is selected.
-- File browser pull-to-Download from 0.5.24 kept. Phone mode untouched.
+- Tablet terminal chrome rewritten to match **Ghostpanter/ssh-pad-flutter** feel:
+  Primer-dark canvas (`#0D1117` / `#E6EDF3`), top status toolbar (dot + title +
+  已连接 · ADB shell), soft-keyboard toggle, disconnect, overflow menu
+  (粘贴 / 清空 / 重连 / 断开), bottom **ExtraKeys** strip (键盘 Esc Tab Ctrl Alt
+  arrows Home End ^C ^D ^Z | ~) with sticky Ctrl/Alt.
+- Visually distinct from 0.5.25 green CRT console. Transport unchanged: adb
+  interactive `shell:` (not SSH / not full PTY). Thin Enter-to-send input row
+  remains because there is no xterm widget.
+- Phone mode unchanged (tools pane hidden on narrow layouts).
+
+### 0.5.25-tablet terminal UX (superseded)
+
+- Console-first green-on-black scrollback + `$` input + Ctrl-C / 重连 / 清空.
 
 ### Install on ColorOS (if UI says 无法安装)
 
@@ -44,7 +50,7 @@ apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
    downloads are a common false "无法安装").
 
 
-Updated: 2026-09-29 20:45 HKT (UTC+8)
+Updated: 2026-09-29 23:20 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 
