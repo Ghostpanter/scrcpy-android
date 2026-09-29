@@ -15,5 +15,6 @@
     <dimen name="touch_min">52dp</dimen>
 
     <dimen name="tools_pane_width">400dp</dimen>
+    <dimen name="tools_pane_min_width">280dp</dimen>
     <dimen name="tools_sidebar_width">150dp</dimen>
 </resources>

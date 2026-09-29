@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Tablet utility tools pane: sidebar nav + content (files / apps / debug / terminal). -->
+<!-- Width 0dp + weight 1: expands into leftover space after the preview
+     pane is sized to the mirrored device aspect ratio (see Mirror.applySplitPreviewSize).
+     tools_pane_width dimen is the minimum clamp, not a fixed width. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/tools_pane"
-    android:layout_width="@dimen/tools_pane_width"
+    android:layout_width="0dp"
     android:layout_height="match_parent"
+    android:layout_weight="1"
     android:orientation="horizontal"
     android:background="@drawable/bg_tools_pane"
     android:clickable="true"
-    android:focusable="true">
+    android:focusable="true"
+    android:minWidth="@dimen/tools_pane_width">
 
     <!-- Sidebar: 实用工具 -->
     <LinearLayout

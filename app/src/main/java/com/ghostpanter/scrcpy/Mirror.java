@@ -26,6 +26,7 @@ import android.view.WindowManager;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -95,6 +96,11 @@ public final class Mirror extends Activity {
     private Button uiModeCycleBtn;
     private Button splitSwapBtn;
 
+    /** Fallback portrait aspect when video size is not yet known (9:16). */
+    private static final float FALLBACK_VIDEO_ASPECT = 9f / 16f;
+    /** Last applied tablet preview pane width (px); 0 when phone / unset. */
+    private int splitPreviewWidthPx;
+
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -140,6 +146,16 @@ public final class Mirror extends Activity {
         // video surface, so re-fit from here as well.
         root.addOnLayoutChangeListener(
                 (view, l, t, r, b, ol, ot, or, ob) -> applyLetterbox());
+        View splitRoot = findViewById(R.id.split_root);
+        if (splitRoot != null && splitRoot != root) {
+            splitRoot.addOnLayoutChangeListener(
+                    (view, l, t, r, b, ol, ot, or, ob) -> {
+                        if (r - l != or - ol || b - t != ob - ot) {
+                            applySplitPreviewSize();
+                            applyLetterbox();
+                        }
+                    });
+        }
         // Keep the target's bottom edge above the source's mandatory Home
         // gesture area. A target gesture can then start on the mirrored
         // handle instead of being claimed by the source system.
@@ -271,12 +287,23 @@ public final class Mirror extends Activity {
     // shape. Also tells the session where the picture ended up, because
     // touches arrive in window coordinates and must be offset by the bars.
     //
+    // On tablet split, first shrink the outer preview pane to the mirrored
+    // aspect so leftover width goes to tools (no wasted side pillarboxes).
+    //
     // No-ops until both the container and the target geometry are known;
     // every caller is a point where one of them may have just changed.
     private void applyLetterbox() {
+        // Even before video size arrives, keep the tablet split sized to a
+        // sensible fallback aspect so tools already have room.
+        applySplitPreviewSize();
+
         View v = surfaceView;
         if (v == null || root == null || session == null) return;
         int cw = root.getWidth(), ch = root.getHeight();
+        // Prefer the pending split width if layout has not applied yet.
+        if (splitPreviewWidthPx > 0 && Ui.isTablet(this)) {
+            cw = splitPreviewWidthPx;
+        }
         // Full-window letterbox only when immersive hide succeeded; otherwise
         // keep the picture clear of the (visible) top system bar / cutout.
         int topInset = (state == State.CONNECTED && immersiveOk) ? 0 : systemTopInset;
@@ -867,11 +894,13 @@ public final class Mirror extends Activity {
         if (!tabletMode) {
             toolsPane.setVisibility(View.GONE);
             if (splitHandle != null) splitHandle.setVisibility(View.GONE);
+            resetPreviewToFill(findViewById(R.id.root));
+            splitPreviewWidthPx = 0;
             Log.i("mirror: phone mode — tools sidebar hidden (override=%s)", Ui.uiModeLabel(this));
             return;
         }
 
-        ensureToolsPaneWidth(toolsPane);
+        applySplitPreviewSize();
         toolsPane.setVisibility(View.VISIBLE);
         if (splitHandle != null) splitHandle.setVisibility(View.VISIBLE);
         applySplitPaneOrder();
@@ -882,6 +911,8 @@ public final class Mirror extends Activity {
             tabletTools = null;
             toolsPane.setVisibility(View.GONE);
             if (splitHandle != null) splitHandle.setVisibility(View.GONE);
+            resetPreviewToFill(findViewById(R.id.root));
+            splitPreviewWidthPx = 0;
             Log.w("mirror: tablet mode but tools bind failed; falling back to phone chrome");
             return;
         }
@@ -891,13 +922,105 @@ public final class Mirror extends Activity {
                 Settings.toolsOnLeft(this));
     }
 
-    private void ensureToolsPaneWidth(View toolsPane) {
-        ViewGroup.LayoutParams lp = toolsPane.getLayoutParams();
-        if (lp == null) return;
-        if (lp.width <= 0) {
-            float density = getResources().getDisplayMetrics().density;
-            lp.width = Math.round(320f * density);
-            toolsPane.setLayoutParams(lp);
+    /**
+     * Phone mode: preview fills the window (weight 1). Tablet mode: size the
+     * preview pane to the mirrored video aspect ratio and let tools_pane expand
+     * into the leftover width (weight 1). Uses {@link #FALLBACK_VIDEO_ASPECT}
+     * until {@code connectedW/H} arrive; re-runs on rotation / size change.
+     */
+    private void applySplitPreviewSize() {
+        View toolsPane = findViewById(R.id.tools_pane);
+        View preview = findViewById(R.id.root);
+        ViewGroup split = findViewById(R.id.split_root);
+        if (preview == null) return;
+
+        if (!Ui.isTablet(this) || toolsPane == null
+                || toolsPane.getVisibility() != View.VISIBLE || split == null) {
+            resetPreviewToFill(preview);
+            splitPreviewWidthPx = 0;
+            return;
+        }
+
+        int splitW = split.getWidth();
+        int splitH = split.getHeight();
+        if (splitW <= 0 || splitH <= 0) {
+            // Not measured yet; root/split layout listeners re-enter applyLetterbox.
+            return;
+        }
+
+        int handleW = 0;
+        if (splitHandle != null && splitHandle.getVisibility() == View.VISIBLE) {
+            handleW = splitHandle.getWidth();
+            if (handleW <= 0) {
+                handleW = Math.round(12f * getResources().getDisplayMetrics().density);
+            }
+        }
+
+        int minTools = getResources().getDimensionPixelSize(R.dimen.tools_pane_min_width);
+        int comfortTools = getResources().getDimensionPixelSize(R.dimen.tools_pane_width);
+        // Prefer the comfortable tools width as the clamp floor; never below min.
+        int toolsFloor = Math.max(minTools, Math.min(comfortTools, splitW / 2));
+        int maxPreviewW = Math.max(1, splitW - handleW - toolsFloor);
+
+        float aspect;
+        if (connectedW > 0 && connectedH > 0) {
+            aspect = connectedW / (float) connectedH;
+        } else {
+            aspect = FALLBACK_VIDEO_ASPECT;
+        }
+
+        int desired = Math.max(1, Math.round(splitH * aspect));
+        int previewW = Math.min(desired, maxPreviewW);
+        float density = getResources().getDisplayMetrics().density;
+        int minPreview = Math.round(120f * density);
+        previewW = Math.max(minPreview, previewW);
+        previewW = Math.min(previewW, maxPreviewW);
+
+        ViewGroup.LayoutParams previewRaw = preview.getLayoutParams();
+        ViewGroup.LayoutParams toolsRaw = toolsPane.getLayoutParams();
+        if (!(previewRaw instanceof LinearLayout.LayoutParams)
+                || !(toolsRaw instanceof LinearLayout.LayoutParams)) {
+            Log.w("mirror: split children lack LinearLayout.LayoutParams; skip aspect sizing");
+            return;
+        }
+        LinearLayout.LayoutParams previewLp = (LinearLayout.LayoutParams) previewRaw;
+        LinearLayout.LayoutParams toolsLp = (LinearLayout.LayoutParams) toolsRaw;
+
+        boolean changed = false;
+        if (previewLp.width != previewW || previewLp.weight != 0f
+                || previewLp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            previewLp.width = previewW;
+            previewLp.weight = 0f;
+            previewLp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            preview.setLayoutParams(previewLp);
+            changed = true;
+        }
+        if (toolsLp.width != 0 || toolsLp.weight != 1f
+                || toolsLp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            toolsLp.width = 0;
+            toolsLp.weight = 1f;
+            toolsLp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            toolsPane.setLayoutParams(toolsLp);
+            changed = true;
+        }
+        splitPreviewWidthPx = previewW;
+        if (changed) {
+            Log.i("mirror: split preview %dpx (aspect=%.3f video=%dx%d split=%dx%d toolsFloor=%d)",
+                    previewW, aspect, connectedW, connectedH, splitW, splitH, toolsFloor);
+        }
+    }
+
+    /** Restore preview pane to fill remaining/full width (phone or tools hidden). */
+    private void resetPreviewToFill(View preview) {
+        ViewGroup.LayoutParams raw = preview.getLayoutParams();
+        if (!(raw instanceof LinearLayout.LayoutParams)) return;
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+        if (lp.width != 0 || lp.weight != 1f
+                || lp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.width = 0;
+            lp.weight = 1f;
+            lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            preview.setLayoutParams(lp);
         }
     }
 
@@ -980,6 +1103,8 @@ public final class Mirror extends Activity {
     private void swapSplitPanes(boolean toast) {
         boolean left = Settings.toggleToolsOnLeft(this);
         applySplitPaneOrder();
+        applySplitPreviewSize();
+        applyLetterbox();
         if (toast) {
             Toast.makeText(this,
                     left ? R.string.split_now_tools_preview : R.string.split_now_preview_tools,

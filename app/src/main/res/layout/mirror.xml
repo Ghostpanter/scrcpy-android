@@ -11,8 +11,9 @@
     android:baselineAligned="false"
     tools:ignore="MergeRootFrame">
 
-    <!-- Video surface with transient connection status + minimal expandable
-         mirror actions (unlock + disconnect) so the preview stays clear. -->
+    <!-- Preview pane: weight 1 fills width in phone mode. On tablet split,
+         Mirror.applySplitPreviewSize sets a fixed width from the mirrored
+         device aspect so tools_pane (weight 1) receives leftover space. -->
     <FrameLayout
         android:id="@+id/root"
         android:layout_width="0dp"

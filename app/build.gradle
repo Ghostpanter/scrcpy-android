@@ -17,8 +17,8 @@ android {
         applicationId 'com.ghostpanter.scrcpy'
         minSdk 28
         targetSdk 34
-        versionCode 32
-        versionName '0.5.21-tablet-coloros'
+        versionCode 33
+        versionName '0.5.22-tablet'
     }
 
     // AGP otherwise embeds a Google-signed dependency-metadata blob in the
