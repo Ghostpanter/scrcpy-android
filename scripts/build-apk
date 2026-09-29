@@ -66,13 +66,10 @@ if [ -z "$APK" ] || [ ! -f "$APK" ]; then
     exit 1
 fi
 
-SUM=$(sha256sum "$APK" | awk '{print $1}')
-
 find_bt() {
     tool="$1"
     SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
     if [ -n "$SDK_ROOT" ] && [ -d "$SDK_ROOT/build-tools" ]; then
-        # Prefer highest installed build-tools.
         latest=$(ls -1 "$SDK_ROOT/build-tools" | sort -V | tail -1)
         if [ -n "$latest" ] && [ -x "$SDK_ROOT/build-tools/$latest/$tool" ]; then
             echo "$SDK_ROOT/build-tools/$latest/$tool"
@@ -94,6 +91,50 @@ if [ -z "$APKSIGNER" ] || [ -z "$AAPT2" ] || [ -z "$ZIPALIGN" ]; then
     exit 1
 fi
 
+# ColorOS: strip unprotected AGP META-INF blobs, then re-sign V1+V2 so OEM
+# JAR verifiers do not see unsigned META-INF entries beside CERT.*.
+echo "build-apk: ColorOS clean META-INF + re-sign V1+V2"
+clean_apk="$OUT_DIR/.coloros-clean.apk"
+python3 - "$APK" "$clean_apk" <<'PY'
+import sys, zipfile
+src, dst = sys.argv[1], sys.argv[2]
+drop_exact = {
+    "META-INF/MANIFEST.MF",
+    "META-INF/version-control-info.textproto",
+}
+with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(dst, "w") as zout:
+    for info in zin.infolist():
+        name = info.filename
+        if name in drop_exact:
+            continue
+        if name.startswith("META-INF/") and name.endswith((".SF", ".RSA", ".DSA", ".EC")):
+            continue
+        if name.startswith("META-INF/com/android/build/gradle/"):
+            continue
+        data = zin.read(name)
+        new = zipfile.ZipInfo(filename=name, date_time=info.date_time)
+        new.compress_type = info.compress_type
+        new.external_attr = info.external_attr
+        new.create_system = info.create_system
+        zout.writestr(new, data)
+PY
+aligned_apk="$OUT_DIR/.coloros-aligned.apk"
+"$ZIPALIGN" -f 4 "$clean_apk" "$aligned_apk"
+"$APKSIGNER" sign \
+    --ks "$KEYSTORE_PATH" \
+    --ks-key-alias "$KEY_ALIAS" \
+    --ks-pass env:KEYSTORE_PASS \
+    --key-pass env:KEY_PASS \
+    --v1-signing-enabled true \
+    --v2-signing-enabled true \
+    --v3-signing-enabled false \
+    --v4-signing-enabled false \
+    --min-sdk-version 28 \
+    --out "$APK" \
+    "$aligned_apk"
+rm -f "$clean_apk" "$aligned_apk" "${APK}.idsig"
+SUM=$(sha256sum "$APK" | awk '{print $1}')
+
 echo "build-apk: apksigner verify"
 if ! verify_out=$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1); then
     printf '%s\n' "$verify_out" >&2
@@ -102,7 +143,26 @@ if ! verify_out=$("$APKSIGNER" verify --verbose --print-certs "$APK" 2>&1); then
 fi
 printf '%s\n' "$verify_out" | sed 's/^/  /'
 
-"$ZIPALIGN" -c -P 16 4 "$APK" || "$ZIPALIGN" -c 4 "$APK"
+# minSdk>=24 makes default verify omit V1 even when META-INF is valid.
+# ColorOS-oriented check: force API-23 verification so V1 must report true.
+echo "build-apk: apksigner verify --min-sdk-version 23 (require V1+V2)"
+if ! v1_out=$("$APKSIGNER" verify --verbose --min-sdk-version 23 "$APK" 2>&1); then
+    printf '%s\n' "$v1_out" >&2
+    echo "build-apk: V1/V2 verify at min-sdk 23 failed" >&2
+    exit 1
+fi
+printf '%s\n' "$v1_out" | grep -q 'Verified using v1 scheme (JAR signing): true' \
+    || { echo "build-apk: V1 signature missing/invalid (ColorOS needs JAR/V1)" >&2; printf '%s\n' "$v1_out" >&2; exit 1; }
+printf '%s\n' "$v1_out" | grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' \
+    || { echo "build-apk: V2 signature missing/invalid" >&2; printf '%s\n' "$v1_out" >&2; exit 1; }
+if printf '%s\n' "$v1_out" | grep -q 'not protected by signature'; then
+    echo "build-apk: unprotected META-INF entries remain:" >&2
+    printf '%s\n' "$v1_out" | grep 'not protected by signature' | sed 's/^/  /' >&2
+    exit 1
+fi
+printf '%s\n' "$v1_out" | sed 's/^/  /'
+
+"$ZIPALIGN" -c 4 "$APK"
 
 actual_permissions=$("$AAPT2" dump permissions "$APK")
 echo "$actual_permissions" | grep -q "package: com.ghostpanter.scrcpy" \
@@ -111,12 +171,14 @@ echo "$actual_permissions" | grep -q "android.permission.INTERNET" \
     || { echo "build-apk: missing INTERNET permission" >&2; exit 1; }
 
 badging=$("$AAPT2" dump badging "$APK")
-echo "$badging" | grep -q "versionName='0.5.22-tablet'" \
+echo "$badging" | grep -q "versionName='0.5.23-tablet'" \
     || { echo "build-apk: unexpected versionName" >&2; echo "$badging" | head -1 >&2; exit 1; }
 echo "$badging" | grep -q "minSdkVersion:'28'" \
     || { echo "build-apk: unexpected minSdk" >&2; exit 1; }
 echo "$badging" | grep -q "targetSdkVersion:'34'" \
     || { echo "build-apk: unexpected targetSdk" >&2; exit 1; }
+echo "$badging" | grep -q "compileSdkVersion='34'" \
+    || { echo "build-apk: unexpected compileSdk (want 34 for ColorOS)" >&2; echo "$badging" | head -1 >&2; exit 1; }
 echo "$badging" | grep -q "native-code: 'arm64-v8a' 'x86_64'" \
     || { echo "build-apk: unexpected ABIs" >&2; echo "$badging" | sed -n '/native-code:/p' >&2; exit 1; }
 

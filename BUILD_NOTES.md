@@ -1,5 +1,39 @@
 # scrcpy-android (Ghostpanter) — build notes
 
+## ColorOS install compatibility (0.5.23-tablet / vc34)
+
+ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when
+`apksigner verify` succeeded. Changes in this release aimed at that:
+
+| Knob | Value | Why |
+| --- | --- | --- |
+| `compileSdk` / `platformBuildVersionCode` | **34** (was 37) | Avoid OEM parsers that mishandle platformBuild 37 / codename "17" |
+| `targetSdk` | **34** | Policy: all ColorOS-facing APKs stay on 34 |
+| `minSdk` | **28** | Android 9+ controller |
+| `jniLibs.useLegacyPackaging` | **true** | Forces `extractNativeLibs=true`; compressed `.so` (ColorOS has failed on page-aligned uncompressed libs) |
+| Signing | Ghostpanter **V1+V2** | Keep JAR (V1) for OEM installers; V2 for modern PM |
+| `android:testOnly` | **false** | Never ship test-only |
+
+`apksigner verify` with default args reports `v1 scheme: false` when
+`minSdk>=24` even though `META-INF/CERT.*` is present and valid. Confirm with:
+
+```
+apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
+# expect: Verified using v1 scheme: true  AND  v2 scheme: true
+```
+
+### Install on ColorOS (if UI says 无法安装)
+
+1. Prefer **adb** over the File Manager installer:
+   `adb install -r -t /path/to/scrcpy-android.apk`
+2. Enable **USB debugging** and **USB debugging (Security settings)**.
+3. Turn off **Pure Mode** / temporary allow unknown sources for the installer.
+4. If a different-signature build is already installed: uninstall
+   `com.ghostpanter.scrcpy` first, then reinstall.
+5. Verify the download SHA-256 matches the release note (incomplete GitHub
+   downloads are a common false "无法安装").
+
+
 Updated: 2026-09-28 21:30 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
