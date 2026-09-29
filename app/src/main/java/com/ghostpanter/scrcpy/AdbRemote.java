@@ -1,6 +1,7 @@
 package com.ghostpanter.scrcpy;
 
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -9,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -286,6 +288,79 @@ public final class AdbRemote {
 
     public String resetDensity() throws Exception {
         return shell("wm density reset", true).trim();
+    }
+
+    // Persistent interactive shell for the tablet terminal pane.
+    public ShellSession openShellSession(ShellSession.Listener listener) throws Exception {
+        return new ShellSession(adb, listener);
+    }
+
+    public static final class ShellSession implements Closeable {
+        public interface Listener {
+            void onOutput(String chunk);
+            void onClosed(String reason);
+        }
+
+        private final AdbStream stream;
+        private final OutputStream stdin;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final Thread reader;
+
+        ShellSession(Adb adb, Listener listener) throws Exception {
+            if (listener == null) throw new IllegalArgumentException("listener");
+            stream = adb.openInteractiveShell();
+            stdin = stream.openOutputStream();
+            AdbStream ref = stream;
+            reader = new Thread(() -> {
+                try (InputStream in = ref.openInputStream()) {
+                    byte[] tmp = new byte[4096];
+                    int n;
+                    while ((n = in.read(tmp)) >= 0) {
+                        if (n == 0) continue;
+                        listener.onOutput(new String(tmp, 0, n, StandardCharsets.UTF_8));
+                    }
+                    if (!closed.get()) listener.onClosed(null);
+                } catch (IOException e) {
+                    if (!closed.get()) {
+                        String m = e.getMessage();
+                        listener.onClosed(m == null || m.isEmpty() ? e.getClass().getSimpleName() : m);
+                    }
+                }
+            }, "adb-shell-session");
+            reader.setDaemon(true);
+            reader.start();
+        }
+
+        public boolean isOpen() {
+            return !closed.get();
+        }
+
+        public void write(String text) throws IOException {
+            if (text == null || text.isEmpty()) return;
+            writeBytes(text.getBytes(StandardCharsets.UTF_8));
+        }
+
+        public void writeBytes(byte[] bytes) throws IOException {
+            if (bytes == null || bytes.length == 0) return;
+            if (closed.get()) throw new IOException("shell session closed");
+            synchronized (stdin) {
+                stdin.write(bytes);
+                stdin.flush();
+            }
+        }
+
+        /** Send ASCII Ctrl-C (0x03) to interrupt the foreground remote process. */
+        public void sendInterrupt() throws IOException {
+            writeBytes(new byte[]{0x03});
+        }
+
+        @Override
+        public void close() {
+            if (!closed.compareAndSet(false, true)) return;
+            try { stdin.close(); } catch (IOException ignored) {}
+            try { stream.close(); } catch (IOException ignored) {}
+            try { reader.interrupt(); } catch (Exception ignored) {}
+        }
     }
 
     public static String joinPath(String dir, String name) {

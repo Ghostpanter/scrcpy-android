@@ -209,6 +209,13 @@ public final class Adb {
         return openDestination("shell:" + cmd);
     }
 
+    // Interactive shell: destination "shell:" with no command. Keeps stdin/stdout
+    // open for a streaming session (tablet terminal). Not a full PTY on all
+    // adbd builds, but far better than one-shot shell:<cmd>.
+    public synchronized AdbStream openInteractiveShell() throws IOException, InterruptedException {
+        return openDestination("shell:");
+    }
+
     public synchronized AdbStream openSync() throws IOException, InterruptedException {
         return openDestination("sync:");
     }

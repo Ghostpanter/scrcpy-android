@@ -1,11 +1,16 @@
 package com.ghostpanter.scrcpy;
 
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -14,6 +19,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.webkit.MimeTypeMap;
 import android.widget.BaseAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -22,6 +28,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -31,6 +39,8 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 // Owns the tablet split-pane tools UI (file browser / app manager / device
 // debug / terminal). Bound from Mirror when layout-sw600dp or layout-w600dp
@@ -84,12 +94,15 @@ public final class TabletTools {
     private AdbRemote.DisplaySize lastSize;
     private AdbRemote.DisplayDensity lastDpi;
 
-    // Terminal
+    // Terminal (interactive streaming shell session)
     private EditText terminalInput;
     private TextView terminalOutput, terminalStatus;
     private ScrollView terminalScroll;
     private final StringBuilder terminalLog = new StringBuilder();
     private static final int TERMINAL_MAX_CHARS = 200_000;
+    private final AtomicReference<AdbRemote.ShellSession> shellSession = new AtomicReference<>();
+    private final Object shellStartLock = new Object();
+    private final AtomicInteger shellGen = new AtomicInteger();
 
     public TabletTools(Activity activity) {
         this.activity = activity;
@@ -124,15 +137,20 @@ public final class TabletTools {
     public void setAdb(Adb adb) {
         this.adb = adb;
         this.remote = adb == null ? null : new AdbRemote(adb);
+        closeShellSession();
         if (remote != null) {
             refreshFiles();
             refreshApps();
             refreshDebug();
+            startShellSession();
+        } else if (terminalStatus != null) {
+            terminalStatus.setText(R.string.files_need_connection);
         }
     }
 
     public void destroy() {
         destroyed.set(true);
+        closeShellSession();
         io.shutdownNow();
     }
 
@@ -218,12 +236,23 @@ public final class TabletTools {
                 toast(R.string.files_select_first);
                 return;
             }
+            // Default: save into the controller's public Download folder.
+            // Long-press keeps SAF "Save as…" for picking another location.
+            pullToDownloads();
+        });
+        activity.findViewById(R.id.files_pull).setOnLongClickListener(v -> {
+            if (!ensureRemote()) return true;
+            if (selectedRemoteFile == null) {
+                toast(R.string.files_select_first);
+                return true;
+            }
             String name = selectedRemoteFile.substring(selectedRemoteFile.lastIndexOf('/') + 1);
             Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             i.setType("*/*");
             i.addCategory(Intent.CATEGORY_OPENABLE);
             i.putExtra(Intent.EXTRA_TITLE, name);
             activity.startActivityForResult(i, RQ_PULL_FILE);
+            return true;
         });
 
         filesList.setOnItemClickListener((parent, view, position, id) -> {
@@ -319,6 +348,110 @@ public final class TabletTools {
                 });
             }
         });
+    }
+
+    /** Pull selected remote file into the controller's public Download directory. */
+    private void pullToDownloads() {
+        AdbRemote r = remote;
+        if (r == null || selectedRemoteFile == null) return;
+        final String remotePath = selectedRemoteFile;
+        String rawName = remotePath.substring(remotePath.lastIndexOf('/') + 1);
+        if (rawName.isEmpty()) rawName = "download.bin";
+        final String name = rawName.replace('/', '_').replace('\\', '_');
+        filesStatus.setText(R.string.files_status_loading);
+        io.execute(() -> {
+            Uri pendingUri = null;
+            ContentResolver resolver = activity.getContentResolver();
+            try {
+                long n;
+                String localLabel;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                    values.put(MediaStore.Downloads.MIME_TYPE, guessMime(name));
+                    values.put(MediaStore.Downloads.IS_PENDING, 1);
+                    values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    pendingUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (pendingUri == null) throw new IOException("MediaStore insert failed");
+                    try (OutputStream out = resolver.openOutputStream(pendingUri)) {
+                        if (out == null) throw new IOException("cannot open " + pendingUri);
+                        n = r.pull(remotePath, out);
+                    }
+                    ContentValues done = new ContentValues();
+                    done.put(MediaStore.Downloads.IS_PENDING, 0);
+                    resolver.update(pendingUri, done, null, null);
+                    pendingUri = null;
+                    localLabel = Environment.DIRECTORY_DOWNLOADS + "/" + name;
+                } else {
+                    File dir = Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS);
+                    if (dir == null) throw new IOException("Downloads unavailable");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        throw new IOException("cannot create Downloads");
+                    }
+                    File dest = uniqueDownloadFile(dir, name);
+                    try (OutputStream out = new FileOutputStream(dest)) {
+                        n = r.pull(remotePath, out);
+                    }
+                    localLabel = dest.getAbsolutePath();
+                }
+                long bytes = n;
+                String label = localLabel;
+                ui.post(() -> {
+                    if (destroyed.get()) return;
+                    filesStatus.setText(activity.getString(R.string.files_pull_download_ok,
+                            label, (int) Math.min(bytes, Integer.MAX_VALUE)));
+                    toast(R.string.files_pull_download_toast);
+                });
+            } catch (Exception e) {
+                if (pendingUri != null) {
+                    try { resolver.delete(pendingUri, null, null); } catch (Exception ignored) {}
+                }
+                ui.post(() -> {
+                    if (destroyed.get()) return;
+                    filesStatus.setText(activity.getString(R.string.files_error, msg(e)));
+                    // API 28 without storage permission: offer SAF save-as.
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        String n2 = selectedRemoteFile == null ? name
+                                : selectedRemoteFile.substring(selectedRemoteFile.lastIndexOf('/') + 1);
+                        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        i.setType("*/*");
+                        i.addCategory(Intent.CATEGORY_OPENABLE);
+                        i.putExtra(Intent.EXTRA_TITLE, n2);
+                        try {
+                            activity.startActivityForResult(i, RQ_PULL_FILE);
+                        } catch (Exception ignored) {}
+                    }
+                });
+            }
+        });
+    }
+
+    private static File uniqueDownloadFile(File dir, String name) {
+        File dest = new File(dir, name);
+        if (!dest.exists()) return dest;
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        for (int i = 1; i < 1000; i++) {
+            File cand = new File(dir, base + "-" + i + ext);
+            if (!cand.exists()) return cand;
+        }
+        return new File(dir, base + "-" + System.currentTimeMillis() + ext);
+    }
+
+    private static String guessMime(String name) {
+        String ext = MimeTypeMap.getFileExtensionFromUrl(name.replace(" ", "_"));
+        if (ext == null || ext.isEmpty()) {
+            int dot = name.lastIndexOf('.');
+            if (dot >= 0 && dot < name.length() - 1) ext = name.substring(dot + 1);
+        }
+        if (ext != null && !ext.isEmpty()) {
+            String mime = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(ext.toLowerCase(Locale.ROOT));
+            if (mime != null) return mime;
+        }
+        return "application/octet-stream";
     }
 
     // ---- apps ----
@@ -586,7 +719,7 @@ public final class TabletTools {
 
     // ---- helpers ----
 
-    // ---- terminal ----
+    // ---- terminal (interactive streaming session) ----
 
     private void bindTerminal() {
         terminalInput = activity.findViewById(R.id.terminal_input);
@@ -594,72 +727,194 @@ public final class TabletTools {
         terminalStatus = activity.findViewById(R.id.terminal_status);
         terminalScroll = activity.findViewById(R.id.terminal_scroll);
 
-        activity.findViewById(R.id.terminal_run).setOnClickListener(v -> runTerminal());
+        activity.findViewById(R.id.terminal_run).setOnClickListener(v -> sendTerminalLine());
         activity.findViewById(R.id.terminal_clear).setOnClickListener(v -> clearTerminal());
+        View ctrl = activity.findViewById(R.id.terminal_ctrl_c);
+        if (ctrl != null) ctrl.setOnClickListener(v -> sendTerminalInterrupt());
+        View reconnect = activity.findViewById(R.id.terminal_reconnect);
+        if (reconnect != null) reconnect.setOnClickListener(v -> {
+            closeShellSession();
+            startShellSession();
+        });
         terminalInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
                     && event.getAction() == KeyEvent.ACTION_DOWN)) {
-                runTerminal();
+                sendTerminalLine();
                 return true;
             }
             return false;
         });
+        if (remote != null) startShellSession();
+        else terminalStatus.setText(R.string.files_need_connection);
     }
 
     private void clearTerminal() {
         terminalLog.setLength(0);
         terminalOutput.setText("");
-        terminalStatus.setText(R.string.terminal_status_ready);
+        AdbRemote.ShellSession s = shellSession.get();
+        terminalStatus.setText(s != null && s.isOpen()
+                ? R.string.terminal_status_connected
+                : R.string.terminal_status_ready);
     }
 
-    private void runTerminal() {
+    private void startShellSession() {
+        if (destroyed.get()) return;
+        AdbRemote r = remote;
+        if (r == null) {
+            if (terminalStatus != null) {
+                terminalStatus.setText(R.string.files_need_connection);
+            }
+            return;
+        }
+        io.execute(() -> {
+            synchronized (shellStartLock) {
+                if (destroyed.get()) return;
+                AdbRemote.ShellSession existing = shellSession.get();
+                if (existing != null && existing.isOpen()) return;
+                closeShellSessionLocked();
+                final int gen = shellGen.get();
+                ui.post(() -> {
+                    if (!destroyed.get() && terminalStatus != null) {
+                        terminalStatus.setText(R.string.terminal_status_connecting);
+                    }
+                });
+                try {
+                    final AtomicReference<AdbRemote.ShellSession> created =
+                            new AtomicReference<>();
+                    AdbRemote.ShellSession session = r.openShellSession(
+                            new AdbRemote.ShellSession.Listener() {
+                                @Override
+                                public void onOutput(String chunk) {
+                                    ui.post(() -> {
+                                        if (destroyed.get()) return;
+                                        appendTerminal(chunk);
+                                    });
+                                }
+
+                                @Override
+                                public void onClosed(String reason) {
+                                    AdbRemote.ShellSession mine = created.get();
+                                    if (mine != null) shellSession.compareAndSet(mine, null);
+                                    if (gen != shellGen.get()) return;
+                                    ui.post(() -> {
+                                        if (destroyed.get()) return;
+                                        if (gen != shellGen.get()) return;
+                                        if (reason != null && !reason.isEmpty()) {
+                                            appendTerminal("\n[" + activity.getString(
+                                                    R.string.terminal_session_closed, reason) + "]\n");
+                                            terminalStatus.setText(activity.getString(
+                                                    R.string.terminal_session_closed, reason));
+                                        } else {
+                                            appendTerminal("\n[" + activity.getString(
+                                                    R.string.terminal_session_ended) + "]\n");
+                                            terminalStatus.setText(R.string.terminal_status_ready);
+                                        }
+                                    });
+                                }
+                            });
+                    created.set(session);
+                    shellSession.set(session);
+                    ui.post(() -> {
+                        if (destroyed.get()) return;
+                        terminalStatus.setText(R.string.terminal_status_connected);
+                        appendTerminal(activity.getString(R.string.terminal_session_started) + "\n");
+                    });
+                } catch (Exception e) {
+                    ui.post(() -> {
+                        if (destroyed.get()) return;
+                        terminalStatus.setText(activity.getString(R.string.terminal_error, msg(e)));
+                        appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
+                    });
+                }
+            }
+        });
+    }
+
+    private void closeShellSession() {
+        synchronized (shellStartLock) {
+            closeShellSessionLocked();
+        }
+    }
+
+    private void closeShellSessionLocked() {
+        shellGen.incrementAndGet();
+        AdbRemote.ShellSession s = shellSession.getAndSet(null);
+        if (s != null) {
+            try { s.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private void sendTerminalLine() {
         if (!ensureRemote()) return;
         String raw = terminalInput.getText() == null ? "" : terminalInput.getText().toString();
         String cmd = sanitizeTerminalCommand(raw);
-        if (cmd.isEmpty()) {
-            toast(R.string.terminal_empty);
+        // Allow empty Enter (just newline) for interactive prompts.
+        AdbRemote.ShellSession s = shellSession.get();
+        if (s == null || !s.isOpen()) {
+            startShellSession();
+            toast(R.string.terminal_status_connecting);
             return;
         }
-        AdbRemote r = remote;
-        terminalStatus.setText(R.string.terminal_status_running);
-        appendTerminal("$ " + cmd + "\n");
+        final String toSend = cmd + "\n";
+        appendTerminal("> " + cmd + "\n");
+        terminalInput.setText("");
+        terminalStatus.setText(R.string.terminal_status_connected);
         io.execute(() -> {
             try {
-                String out = r.shell(cmd, false);
-                if (out == null) out = "";
-                if (!out.isEmpty() && !out.endsWith("\n")) out = out + "\n";
-                String finalOut = out;
-                ui.post(() -> {
-                    if (destroyed.get()) return;
-                    appendTerminal(finalOut);
-                    terminalStatus.setText(R.string.terminal_status_ready);
-                    // Keep the command for quick re-run / edit; select all for overwrite.
-                    terminalInput.selectAll();
-                });
+                s.write(toSend);
             } catch (Exception e) {
                 ui.post(() -> {
                     if (destroyed.get()) return;
                     appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
                     terminalStatus.setText(activity.getString(R.string.terminal_error, msg(e)));
+                    // Session likely dead; try to reopen.
+                    closeShellSession();
+                    startShellSession();
                 });
             }
         });
     }
 
-    /** Strip habitual "adb " / "adb shell " prefixes; trim. */
+    private void sendTerminalInterrupt() {
+        AdbRemote.ShellSession s = shellSession.get();
+        if (s == null || !s.isOpen()) {
+            toast(R.string.files_need_connection);
+            return;
+        }
+        appendTerminal("^C\n");
+        io.execute(() -> {
+            try {
+                s.sendInterrupt();
+            } catch (Exception e) {
+                ui.post(() -> {
+                    if (destroyed.get()) return;
+                    appendTerminal(activity.getString(R.string.terminal_error, msg(e)) + "\n");
+                });
+            }
+        });
+    }
+
+    /** Strip habitual "adb " / "adb shell " prefixes; trim. Keep interior spaces. */
     private static String sanitizeTerminalCommand(String raw) {
         if (raw == null) return "";
-        String s = raw.trim();
-        if (s.regionMatches(true, 0, "adb shell ", 0, 10)) {
-            s = s.substring(10).trim();
-        } else if (s.regionMatches(true, 0, "adb ", 0, 4)) {
-            s = s.substring(4).trim();
-            if (s.regionMatches(true, 0, "shell ", 0, 6)) {
-                s = s.substring(6).trim();
-            } else if (s.equalsIgnoreCase("shell")) {
+        String s = raw;
+        // Only strip leading/trailing whitespace for prefix detection; preserve
+        // intentional trailing spaces after the command body is extracted.
+        String trimmed = s.trim();
+        if (trimmed.regionMatches(true, 0, "adb shell ", 0, 10)) {
+            s = trimmed.substring(10);
+        } else if (trimmed.regionMatches(true, 0, "adb ", 0, 4)) {
+            String rest = trimmed.substring(4);
+            if (rest.regionMatches(true, 0, "shell ", 0, 6)) {
+                s = rest.substring(6);
+            } else if (rest.equalsIgnoreCase("shell")) {
                 s = "";
+            } else {
+                s = rest;
             }
+        } else {
+            s = trimmed;
         }
         return s;
     }

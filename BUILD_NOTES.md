@@ -1,6 +1,6 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-## ColorOS install compatibility (0.5.23-tablet / vc34)
+## ColorOS install compatibility (0.5.24-tablet / vc35)
 
 ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when
 `apksigner verify` succeeded. Changes in this release aimed at that:
@@ -22,6 +22,15 @@ apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
 # expect: Verified using v1 scheme: true  AND  v2 scheme: true
 ```
 
+### 0.5.24-tablet tool upgrades
+
+- File browser **传出到本机**: pulls the selected remote file into the controller’s
+  public `Download` folder via MediaStore (API 29+); long-press still opens SAF Save As.
+  **传入** unchanged (SAF document picker → adb push into current remote dir).
+- Terminal: persistent interactive `shell:` session with streaming stdout, stdin Send,
+  Ctrl-C (0x03), and Reconnect. Not a full PTY on all adbd builds (no reliable resize /
+  curses); better than one-shot `shell:<cmd>`.
+
 ### Install on ColorOS (if UI says 无法安装)
 
 1. Prefer **adb** over the File Manager installer:
@@ -34,7 +43,7 @@ apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
    downloads are a common false "无法安装").
 
 
-Updated: 2026-09-28 21:30 HKT (UTC+8)
+Updated: 2026-09-29 20:45 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 
