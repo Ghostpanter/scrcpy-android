@@ -1,5 +1,19 @@
 # scrcpy-android (Ghostpanter) — build notes
 
+## Universal ABI APK (0.5.27-tablet / vc38)
+
+One install package, no Play ABI splits. `ndk.abiFilters` now keeps every ABI
+already shipped by `conscrypt-android` 2.6.1 and `spake2-android` 2.2.1:
+
+| ABI | Where it runs |
+| --- | --- |
+| `arm64-v8a` | modern phones / tablets |
+| `armeabi-v7a` | 32-bit ARM devices |
+| `x86_64` | 64-bit emulators, ChromeOS |
+| `x86` | 32-bit x86 emulators |
+
+ColorOS recipe is unchanged: compileSdk+targetSdk **34**, `extractNativeLibs` true, Ghostpanter V1+V2.
+
 ## ColorOS install compatibility (0.5.26-tablet / vc37)
 
 ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when

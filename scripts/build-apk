@@ -171,7 +171,7 @@ echo "$actual_permissions" | grep -q "android.permission.INTERNET" \
     || { echo "build-apk: missing INTERNET permission" >&2; exit 1; }
 
 badging=$("$AAPT2" dump badging "$APK")
-echo "$badging" | grep -q "versionName='0.5.26-tablet'" \
+echo "$badging" | grep -q "versionName='0.5.27-tablet'" \
     || { echo "build-apk: unexpected versionName" >&2; echo "$badging" | head -1 >&2; exit 1; }
 echo "$badging" | grep -q "minSdkVersion:'28'" \
     || { echo "build-apk: unexpected minSdk" >&2; exit 1; }
@@ -179,8 +179,14 @@ echo "$badging" | grep -q "targetSdkVersion:'34'" \
     || { echo "build-apk: unexpected targetSdk" >&2; exit 1; }
 echo "$badging" | grep -q "compileSdkVersion='34'" \
     || { echo "build-apk: unexpected compileSdk (want 34 for ColorOS)" >&2; echo "$badging" | head -1 >&2; exit 1; }
-echo "$badging" | grep -q "native-code: 'arm64-v8a' 'x86_64'" \
-    || { echo "build-apk: unexpected ABIs" >&2; echo "$badging" | sed -n '/native-code:/p' >&2; exit 1; }
+# Universal APK: every ABI present in conscrypt + spake2.
+native_line=$(printf '%s\n' "$badging" | sed -n '/native-code:/p')
+for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+    printf '%s\n' "$native_line" | grep -q "'$abi'" \
+        || { echo "build-apk: missing ABI $abi" >&2; echo "$native_line" >&2; exit 1; }
+done
+# x86 must not match as a prefix of x86_64 only; the quoted token above handles that.
+echo "build-apk: ABIs $native_line"
 
 # Legacy download name used by the GitHub release asset.
 cp -f "$APK" "$ROOT/artifacts/scrcpy-android.apk"

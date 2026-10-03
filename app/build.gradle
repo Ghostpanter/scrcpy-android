@@ -17,8 +17,8 @@ android {
         applicationId 'com.ghostpanter.scrcpy'
         minSdk 28
         targetSdk 34
-        versionCode 37
-        versionName '0.5.26-tablet'
+        versionCode 38
+        versionName '0.5.27-tablet'
     }
 
     // AGP otherwise embeds a Google-signed dependency-metadata blob in the
@@ -55,13 +55,15 @@ android {
         }
     }
 
-    // Ship one ordinary APK containing both supported 64-bit ABIs. arm64
-    // covers physical devices; x86_64 covers emulators and ChromeOS without
-    // introducing split-APK installation logic.
+    // One universal APK (no ABI splits). Every ABI shipped by the native
+    // deps (conscrypt-android, spake2-android) is included:
+    //   armeabi-v7a, arm64-v8a, x86, x86_64
+    // arm64 / armeabi-v7a cover physical devices; x86_64 / x86 cover
+    // emulators and ChromeOS. No Play splits.
     buildTypes {
         debug {
             ndk {
-                abiFilters 'arm64-v8a', 'x86_64'
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
         }
         release {
@@ -70,22 +72,17 @@ android {
             vcsInfo {
                 include false
             }
-            // x86_64 is here so the emulator can install and RUN the
-            // minified artifact. Without it no tier ever executed the
-            // variant that ships, and an R8 misconfiguration - a keep
-            // rule that is too narrow, a reflective edge R8 could not
-            // see - would first show up on a user's device. It costs a
-            // second ABI in the APK and buys coverage of the only build
-            // that matters.
+            // 32-bit and x86 are included so 32-bit devices and x86
+            // emulators can install and RUN the minified artifact, not
+            // only arm64 phones and x86_64 emulators.
             //
-            // This is why the APK is multi-MB while the dex shrank: it
-            // carries two copies of libconscrypt_jni.so and libspake2.so.
+            // The APK carries one copy of libconscrypt_jni.so and
+            // libspake2.so per ABI (four ABIs).
             // ColorOS-compat builds use jniLibs.useLegacyPackaging so the
             // libs are compressed and extracted on install (extractNativeLibs
-            // true). A single-ABI build is smaller; splits are the next step
-            // if download size starts to matter.
+            // true). Do not switch to ABI splits: one universal APK.
             ndk {
-                abiFilters 'arm64-v8a', 'x86_64'
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
             minifyEnabled   true
             shrinkResources = true

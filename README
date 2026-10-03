@@ -84,7 +84,7 @@ Set all four signing variables and run the release script:
 The script verifies the wrapper and scrcpy server, builds the minified APK,
 checks its signature, 16 KiB page alignment, SDK levels, exact permission set,
 and exact ABI set with build-tools 35, then prints its SHA-256. The APK contains
-`arm64-v8a` and `x86_64` native libraries.
+`armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64` native libraries (one universal APK, no ABI splits).
 
 Keep the signing keystore outside this repository. `.gitignore` cannot protect
 an arbitrary keystore filename.
