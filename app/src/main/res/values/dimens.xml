@@ -14,4 +14,11 @@
 
     <dimen name="card_padding">16dp</dimen>
     <dimen name="touch_min">48dp</dimen>
+
+    <!-- Comfortable / minimum tools width in tablet split. Preview pane shrinks
+         to device aspect; tools expand with weight. tools_pane_width is the
+         clamp floor so tools stay usable when the mirrored device is wide. -->
+    <dimen name="tools_pane_width">320dp</dimen>
+    <dimen name="tools_pane_min_width">240dp</dimen>
+    <dimen name="tools_sidebar_width">140dp</dimen>
 </resources>

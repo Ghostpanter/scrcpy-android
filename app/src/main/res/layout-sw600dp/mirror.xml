@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Unified mirror: preview | tools split always inflated; Mirror shows/hides
-     tools_pane from Ui.isTablet (incl. force override). Preview FrameLayout
-     keeps id=root so letterboxing/insets/FAB stay unchanged. -->
+<!-- Wide / tablet: live preview | utility tools split. Preview FrameLayout
+     keeps id=root so Mirror letterboxing/insets/FAB stay unchanged. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/split_root"

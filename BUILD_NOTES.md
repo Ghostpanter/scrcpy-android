@@ -1,6 +1,88 @@
 # scrcpy-android (Ghostpanter) — build notes
 
-Updated: 2026-09-28 21:30 HKT (UTC+8)
+## 卓易通 block (0.5.28-tablet / vc39)
+
+Intentional: the app refuses to run inside, or connect to, 卓易通 (Zhuoyitong,
+the Android container on HarmonyOS NEXT / HarmonyOS PC). All detection lives in
+`ZhuoyitongGuard.java` (signal list documented in its class comment).
+
+| Where | When | Action |
+| --- | --- | --- |
+| Controller | `App.attachBaseContext` (before providers), then `Main.onCreate` / `Mirror.onCreate` | Dialog "当前环境为卓易通，不支持运行" → `finishAffinity` + kill process (auto after 3 s) |
+| Controlled device | `Session.bringUpAttempt` right after `adb connect` (once per session) | adb shell probe → disconnect, no retries → dialog "被控设备为卓易通环境…" → exit |
+
+Strong (any one): kernel string "HongMeng"; cgroup token isulad/zhuoyi/anco;
+mountinfo anco_hmos/isulad/zhuoyi/anco; installer `com.zhuoyi.appstore.lite`
+(local); any prop key/value containing zhuoyi/isulad; build token zhuoyi.
+Weak (need two kinds): cgroup lxc; prop key token anco; build token
+droi/zyt/anco/easyabroad; package `com.zhuoyi.appstore.lite`/`com.droi.*` installed.
+Logcat: `adb logcat -s scrcpy-android | grep zyt:` shows the matched signals.
+
+## Universal ABI APK (0.5.27-tablet / vc38)
+
+One install package, no Play ABI splits. `ndk.abiFilters` now keeps every ABI
+already shipped by `conscrypt-android` 2.6.1 and `spake2-android` 2.2.1:
+
+| ABI | Where it runs |
+| --- | --- |
+| `arm64-v8a` | modern phones / tablets |
+| `armeabi-v7a` | 32-bit ARM devices |
+| `x86_64` | 64-bit emulators, ChromeOS |
+| `x86` | 32-bit x86 emulators |
+
+ColorOS recipe is unchanged: compileSdk+targetSdk **34**, `extractNativeLibs` true, Ghostpanter V1+V2.
+
+## ColorOS install compatibility (0.5.26-tablet / vc37)
+
+ColorOS PackageInstaller has rejected earlier Ghostpanter builds even when
+`apksigner verify` succeeded. Changes in this release aimed at that:
+
+| Knob | Value | Why |
+| --- | --- | --- |
+| `compileSdk` / `platformBuildVersionCode` | **34** (was 37) | Avoid OEM parsers that mishandle platformBuild 37 / codename "17" |
+| `targetSdk` | **34** | Policy: all ColorOS-facing APKs stay on 34 |
+| `minSdk` | **28** | Android 9+ controller |
+| `jniLibs.useLegacyPackaging` | **true** | Forces `extractNativeLibs=true`; compressed `.so` (ColorOS has failed on page-aligned uncompressed libs) |
+| Signing | Ghostpanter **V1+V2** | Keep JAR (V1) for OEM installers; V2 for modern PM |
+| `android:testOnly` | **false** | Never ship test-only |
+
+`apksigner verify` with default args reports `v1 scheme: false` when
+`minSdk>=24` even though `META-INF/CERT.*` is present and valid. Confirm with:
+
+```
+apksigner verify --verbose --min-sdk-version 23 scrcpy-android.apk
+# expect: Verified using v1 scheme: true  AND  v2 scheme: true
+```
+
+### 0.5.26-tablet terminal UX (ssh-pad aligned)
+
+- Tablet terminal chrome rewritten to match **Ghostpanter/ssh-pad-flutter** feel:
+  Primer-dark canvas (`#0D1117` / `#E6EDF3`), top status toolbar (dot + title +
+  已连接 · ADB shell), soft-keyboard toggle, disconnect, overflow menu
+  (粘贴 / 清空 / 重连 / 断开), bottom **ExtraKeys** strip (键盘 Esc Tab Ctrl Alt
+  arrows Home End ^C ^D ^Z | ~) with sticky Ctrl/Alt.
+- Visually distinct from 0.5.25 green CRT console. Transport unchanged: adb
+  interactive `shell:` (not SSH / not full PTY). Thin Enter-to-send input row
+  remains because there is no xterm widget.
+- Phone mode unchanged (tools pane hidden on narrow layouts).
+
+### 0.5.25-tablet terminal UX (superseded)
+
+- Console-first green-on-black scrollback + `$` input + Ctrl-C / 重连 / 清空.
+
+### Install on ColorOS (if UI says 无法安装)
+
+1. Prefer **adb** over the File Manager installer:
+   `adb install -r -t /path/to/scrcpy-android.apk`
+2. Enable **USB debugging** and **USB debugging (Security settings)**.
+3. Turn off **Pure Mode** / temporary allow unknown sources for the installer.
+4. If a different-signature build is already installed: uninstall
+   `com.ghostpanter.scrcpy` first, then reinstall.
+5. Verify the download SHA-256 matches the release note (incomplete GitHub
+   downloads are a common false "无法安装").
+
+
+Updated: 2026-09-29 23:20 HKT (UTC+8)
 
 ## Rebuild from a fresh clone
 

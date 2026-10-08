@@ -19,12 +19,14 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -88,6 +90,17 @@ public final class Mirror extends Activity {
     private boolean mirrorMenuOpen;
     private boolean unlockPanelOpen;
 
+    // Bound when effective tablet mode shows tools_pane (incl. force override).
+    private TabletTools tabletTools;
+    private View splitHandle;
+    private Button uiModeCycleBtn;
+    private Button splitSwapBtn;
+
+    /** Fallback portrait aspect when video size is not yet known (9:16). */
+    private static final float FALLBACK_VIDEO_ASPECT = 9f / 16f;
+    /** Last applied tablet preview pane width (px); 0 when phone / unset. */
+    private int splitPreviewWidthPx;
+
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     @Override
@@ -95,6 +108,8 @@ public final class Mirror extends Activity {
     @SuppressWarnings("deprecation")
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        // Restored task after process death can land here directly.
+        if (ZhuoyitongGuard.blockIfLocal(this)) return;
         setContentView(R.layout.mirror);
         // Start CONNECTING with system bars visible so the status pill can
         // clear status/cutout. Immersive hide applies once CONNECTED.
@@ -133,6 +148,16 @@ public final class Mirror extends Activity {
         // video surface, so re-fit from here as well.
         root.addOnLayoutChangeListener(
                 (view, l, t, r, b, ol, ot, or, ob) -> applyLetterbox());
+        View splitRoot = findViewById(R.id.split_root);
+        if (splitRoot != null && splitRoot != root) {
+            splitRoot.addOnLayoutChangeListener(
+                    (view, l, t, r, b, ol, ot, or, ob) -> {
+                        if (r - l != or - ol || b - t != ob - ot) {
+                            applySplitPreviewSize();
+                            applyLetterbox();
+                        }
+                    });
+        }
         // Keep the target's bottom edge above the source's mandatory Home
         // gesture area. A target gesture can then start on the mirrored
         // handle instead of being claimed by the source system.
@@ -179,6 +204,12 @@ public final class Mirror extends Activity {
         setupMirrorActions();
         updateStatusBar();
 
+        // Effective tablet vs phone (Ui.isTablet honors Settings force override).
+        // tools_pane is always in the unified layout; show/hide + split order apply here.
+        Log.i("mirror: %s", Ui.deviceModeSummary(this));
+        applyTabletChrome();
+        setupUiModeControls();
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackRequested);
@@ -198,6 +229,7 @@ public final class Mirror extends Activity {
                 runOnUiThread(() -> {
                     if (destroyed) return;
                     adb = a;
+                    if (tabletTools != null) tabletTools.setAdb(a);
                     if (session == null && currentSurface != null) {
                         startSession(currentSurface);
                     }
@@ -257,12 +289,23 @@ public final class Mirror extends Activity {
     // shape. Also tells the session where the picture ended up, because
     // touches arrive in window coordinates and must be offset by the bars.
     //
+    // On tablet split, first shrink the outer preview pane to the mirrored
+    // aspect so leftover width goes to tools (no wasted side pillarboxes).
+    //
     // No-ops until both the container and the target geometry are known;
     // every caller is a point where one of them may have just changed.
     private void applyLetterbox() {
+        // Even before video size arrives, keep the tablet split sized to a
+        // sensible fallback aspect so tools already have room.
+        applySplitPreviewSize();
+
         View v = surfaceView;
         if (v == null || root == null || session == null) return;
         int cw = root.getWidth(), ch = root.getHeight();
+        // Prefer the pending split width if layout has not applied yet.
+        if (splitPreviewWidthPx > 0 && Ui.isTablet(this)) {
+            cw = splitPreviewWidthPx;
+        }
         // Full-window letterbox only when immersive hide succeeded; otherwise
         // keep the picture clear of the (visible) top system bar / cutout.
         int topInset = (state == State.CONNECTED && immersiveOk) ? 0 : systemTopInset;
@@ -358,6 +401,12 @@ public final class Mirror extends Activity {
             }
             @Override public void onError(Throwable t) {
                 runOnUiThread(() -> {
+                    if (t instanceof ZhuoyitongGuard.BlockedException) {
+                        // Controlled device is 卓易通: already disconnected; exit.
+                        ZhuoyitongGuard.showAndExit(Mirror.this,
+                                getString(R.string.zyt_remote_blocked));
+                        return;
+                    }
                     if (destroyed || generation != sessionGeneration) return;
                     Toast.makeText(Mirror.this, describe(t), Toast.LENGTH_LONG).show();
                 });
@@ -479,6 +528,7 @@ public final class Mirror extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (target == null) return;
         String host = intent.getStringExtra(EXTRA_HOST);
         int port = intent.getIntExtra(EXTRA_PORT, -1);
         if (host == null || port <= 0 || port > 65535) {
@@ -532,7 +582,10 @@ public final class Mirror extends Activity {
         }
         refreshMirrorActionsVisibility();
         if (state == State.CONNECTED) {
-            immersive();
+            // Keep system bars visible beside the tools pane so tablet
+            // controls stay reachable; phone full-screen still goes immersive.
+            if (tabletTools != null) showSystemBarsForStatus();
+            else immersive();
         } else {
             showSystemBarsForStatus();
         }
@@ -611,10 +664,21 @@ public final class Mirror extends Activity {
     // ---- lifecycle ----
 
     @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (tabletTools != null) tabletTools.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
     protected void onDestroy() {
         destroyed = true;
         sessionGeneration++;
         ui.removeCallbacksAndMessages(null);
+        if (tabletTools != null) {
+            tabletTools.destroy();
+            tabletTools = null;
+        }
         currentSurface = null;
         Session s = session;
         session = null;
@@ -631,7 +695,10 @@ public final class Mirror extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            if (state == State.CONNECTED) immersive();
+            if (state == State.CONNECTED) {
+                if (tabletTools != null) showSystemBarsForStatus();
+                else immersive();
+            }
             if (session != null) session.syncClipboard();
         }
     }
@@ -807,6 +874,322 @@ public final class Mirror extends Activity {
         statusBar.requestApplyInsets();
     }
 
+    // ---- tablet chrome / UI mode / split order ----
+
+    /**
+     * Show or hide the tools pane from {@link Ui#isTablet(android.content.Context)},
+     * bind TabletTools when visible, and apply Preview|Tools vs Tools|Preview order.
+     */
+    private void applyTabletChrome() {
+        View toolsPane = findViewById(R.id.tools_pane);
+        splitHandle = findViewById(R.id.split_handle);
+        boolean tabletMode = Ui.isTablet(this);
+
+        if (tabletTools != null) {
+            tabletTools.destroy();
+            tabletTools = null;
+        }
+
+        if (toolsPane == null) {
+            if (splitHandle != null) splitHandle.setVisibility(View.GONE);
+            if (tabletMode) {
+                Log.w("mirror: tablet mode but tools_pane missing; phone chrome only");
+            } else {
+                Log.i("mirror: phone mode — no tools sidebar");
+            }
+            return;
+        }
+
+        if (!tabletMode) {
+            toolsPane.setVisibility(View.GONE);
+            if (splitHandle != null) splitHandle.setVisibility(View.GONE);
+            resetPreviewToFill(findViewById(R.id.root));
+            splitPreviewWidthPx = 0;
+            Log.i("mirror: phone mode — tools sidebar hidden (override=%s)", Ui.uiModeLabel(this));
+            return;
+        }
+
+        applySplitPreviewSize();
+        toolsPane.setVisibility(View.VISIBLE);
+        if (splitHandle != null) splitHandle.setVisibility(View.VISIBLE);
+        applySplitPaneOrder();
+        setupSplitHandleDrag();
+
+        tabletTools = new TabletTools(this);
+        if (!tabletTools.bind()) {
+            tabletTools = null;
+            toolsPane.setVisibility(View.GONE);
+            if (splitHandle != null) splitHandle.setVisibility(View.GONE);
+            resetPreviewToFill(findViewById(R.id.root));
+            splitPreviewWidthPx = 0;
+            Log.w("mirror: tablet mode but tools bind failed; falling back to phone chrome");
+            return;
+        }
+        if (adb != null) tabletTools.setAdb(adb);
+        wireToolsPaneModeButtons();
+        Log.i("mirror: tablet mode — split tools pane active (tools_on_left=%b)",
+                Settings.toolsOnLeft(this));
+    }
+
+    /**
+     * Phone mode: preview fills the window (weight 1). Tablet mode: size the
+     * preview pane to the mirrored video aspect ratio and let tools_pane expand
+     * into the leftover width (weight 1). Uses {@link #FALLBACK_VIDEO_ASPECT}
+     * until {@code connectedW/H} arrive; re-runs on rotation / size change.
+     */
+    private void applySplitPreviewSize() {
+        View toolsPane = findViewById(R.id.tools_pane);
+        View preview = findViewById(R.id.root);
+        ViewGroup split = findViewById(R.id.split_root);
+        if (preview == null) return;
+
+        if (!Ui.isTablet(this) || toolsPane == null
+                || toolsPane.getVisibility() != View.VISIBLE || split == null) {
+            resetPreviewToFill(preview);
+            splitPreviewWidthPx = 0;
+            return;
+        }
+
+        int splitW = split.getWidth();
+        int splitH = split.getHeight();
+        if (splitW <= 0 || splitH <= 0) {
+            // Not measured yet; root/split layout listeners re-enter applyLetterbox.
+            return;
+        }
+
+        int handleW = 0;
+        if (splitHandle != null && splitHandle.getVisibility() == View.VISIBLE) {
+            handleW = splitHandle.getWidth();
+            if (handleW <= 0) {
+                handleW = Math.round(12f * getResources().getDisplayMetrics().density);
+            }
+        }
+
+        int minTools = getResources().getDimensionPixelSize(R.dimen.tools_pane_min_width);
+        int comfortTools = getResources().getDimensionPixelSize(R.dimen.tools_pane_width);
+        // Prefer the comfortable tools width as the clamp floor; never below min.
+        int toolsFloor = Math.max(minTools, Math.min(comfortTools, splitW / 2));
+        int maxPreviewW = Math.max(1, splitW - handleW - toolsFloor);
+
+        float aspect;
+        if (connectedW > 0 && connectedH > 0) {
+            aspect = connectedW / (float) connectedH;
+        } else {
+            aspect = FALLBACK_VIDEO_ASPECT;
+        }
+
+        int desired = Math.max(1, Math.round(splitH * aspect));
+        int previewW = Math.min(desired, maxPreviewW);
+        float density = getResources().getDisplayMetrics().density;
+        int minPreview = Math.round(120f * density);
+        previewW = Math.max(minPreview, previewW);
+        previewW = Math.min(previewW, maxPreviewW);
+
+        ViewGroup.LayoutParams previewRaw = preview.getLayoutParams();
+        ViewGroup.LayoutParams toolsRaw = toolsPane.getLayoutParams();
+        if (!(previewRaw instanceof LinearLayout.LayoutParams)
+                || !(toolsRaw instanceof LinearLayout.LayoutParams)) {
+            Log.w("mirror: split children lack LinearLayout.LayoutParams; skip aspect sizing");
+            return;
+        }
+        LinearLayout.LayoutParams previewLp = (LinearLayout.LayoutParams) previewRaw;
+        LinearLayout.LayoutParams toolsLp = (LinearLayout.LayoutParams) toolsRaw;
+
+        boolean changed = false;
+        if (previewLp.width != previewW || previewLp.weight != 0f
+                || previewLp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            previewLp.width = previewW;
+            previewLp.weight = 0f;
+            previewLp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            preview.setLayoutParams(previewLp);
+            changed = true;
+        }
+        if (toolsLp.width != 0 || toolsLp.weight != 1f
+                || toolsLp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            toolsLp.width = 0;
+            toolsLp.weight = 1f;
+            toolsLp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            toolsPane.setLayoutParams(toolsLp);
+            changed = true;
+        }
+        splitPreviewWidthPx = previewW;
+        if (changed) {
+            Log.i("mirror: split preview %dpx (aspect=%.3f video=%dx%d split=%dx%d toolsFloor=%d)",
+                    previewW, aspect, connectedW, connectedH, splitW, splitH, toolsFloor);
+        }
+    }
+
+    /** Restore preview pane to fill remaining/full width (phone or tools hidden). */
+    private void resetPreviewToFill(View preview) {
+        ViewGroup.LayoutParams raw = preview.getLayoutParams();
+        if (!(raw instanceof LinearLayout.LayoutParams)) return;
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) raw;
+        if (lp.width != 0 || lp.weight != 1f
+                || lp.height != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.width = 0;
+            lp.weight = 1f;
+            lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+            preview.setLayoutParams(lp);
+        }
+    }
+
+    /** Reorder split_root children to Preview|Handle|Tools or Tools|Handle|Preview. */
+    private void applySplitPaneOrder() {
+        ViewGroup split = findViewById(R.id.split_root);
+        View preview = findViewById(R.id.root);
+        View tools = findViewById(R.id.tools_pane);
+        View handle = findViewById(R.id.split_handle);
+        if (split == null || preview == null || tools == null) return;
+        if (tools.getVisibility() != View.VISIBLE) return;
+
+        boolean toolsLeft = Settings.toolsOnLeft(this);
+        split.removeView(preview);
+        if (handle != null) split.removeView(handle);
+        split.removeView(tools);
+
+        if (toolsLeft) {
+            split.addView(tools);
+            if (handle != null) split.addView(handle);
+            split.addView(preview);
+        } else {
+            split.addView(preview);
+            if (handle != null) split.addView(handle);
+            split.addView(tools);
+        }
+        // root field still points at preview FrameLayout (id=root).
+        root = preview;
+    }
+
+    private void setupSplitHandleDrag() {
+        if (splitHandle == null) return;
+        final float density = getResources().getDisplayMetrics().density;
+        final float thresholdPx = 40f * density;
+        splitHandle.setOnTouchListener(new View.OnTouchListener() {
+            float downX;
+            boolean tracking;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = event.getRawX();
+                        tracking = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        return tracking;
+                    case MotionEvent.ACTION_UP:
+                        if (tracking) {
+                            float dx = event.getRawX() - downX;
+                            if (Math.abs(dx) >= thresholdPx) {
+                                // Significant horizontal drag toggles the only two layouts.
+                                boolean toolsLeft = Settings.toolsOnLeft(Mirror.this);
+                                // Drag left → prefer tools on left; drag right → tools on right.
+                                boolean wantLeft = dx < 0;
+                                if (wantLeft != toolsLeft) {
+                                    swapSplitPanes(/*toast=*/ true);
+                                }
+                            } else if (Math.abs(dx) < 8f * density) {
+                                // Tap on handle also swaps.
+                                swapSplitPanes(/*toast=*/ true);
+                            }
+                        }
+                        tracking = false;
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        tracking = false;
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        });
+        splitHandle.setOnLongClickListener(v -> {
+            swapSplitPanes(/*toast=*/ true);
+            return true;
+        });
+    }
+
+    private void swapSplitPanes(boolean toast) {
+        boolean left = Settings.toggleToolsOnLeft(this);
+        applySplitPaneOrder();
+        applySplitPreviewSize();
+        applyLetterbox();
+        if (toast) {
+            Toast.makeText(this,
+                    left ? R.string.split_now_tools_preview : R.string.split_now_preview_tools,
+                    Toast.LENGTH_SHORT).show();
+        }
+        Log.i("mirror: split order tools_on_left=%b", left);
+    }
+
+    private void setupUiModeControls() {
+        uiModeCycleBtn = findViewById(R.id.ui_mode_cycle);
+        splitSwapBtn = findViewById(R.id.split_swap);
+        if (uiModeCycleBtn != null) {
+            refreshUiModeCycleLabel();
+            uiModeCycleBtn.setOnClickListener(v -> cycleUiModeAndRelaunch());
+        }
+        if (splitSwapBtn != null) {
+            splitSwapBtn.setOnClickListener(v -> {
+                collapseMirrorMenu();
+                swapSplitPanes(/*toast=*/ true);
+            });
+            splitSwapBtn.setVisibility(Ui.isTablet(this) ? View.VISIBLE : View.GONE);
+        }
+        wireToolsPaneModeButtons();
+    }
+
+    private void wireToolsPaneModeButtons() {
+        View toolsUiMode = findViewById(R.id.tools_ui_mode);
+        if (toolsUiMode != null) {
+            toolsUiMode.setOnClickListener(v -> cycleUiModeAndRelaunch());
+        }
+        View toolsSwap = findViewById(R.id.tools_split_swap);
+        if (toolsSwap != null) {
+            toolsSwap.setOnClickListener(v -> swapSplitPanes(/*toast=*/ true));
+        }
+    }
+
+    private void refreshUiModeCycleLabel() {
+        if (uiModeCycleBtn == null) return;
+        int label;
+        switch (Settings.uiMode(this)) {
+            case Settings.UI_MODE_PHONE:
+                label = R.string.ui_mode_phone;
+                break;
+            case Settings.UI_MODE_TABLET:
+                label = R.string.ui_mode_tablet;
+                break;
+            default:
+                label = R.string.ui_mode_auto;
+        }
+        uiModeCycleBtn.setText(getString(R.string.ui_mode_cycle) + " (" + getString(label) + ")");
+    }
+
+    @SuppressWarnings("deprecation")
+    private void cycleUiModeAndRelaunch() {
+        int mode = Settings.cycleUiMode(this);
+        int toast;
+        switch (mode) {
+            case Settings.UI_MODE_PHONE:
+                toast = R.string.ui_mode_now_phone;
+                break;
+            case Settings.UI_MODE_TABLET:
+                toast = R.string.ui_mode_now_tablet;
+                break;
+            default:
+                toast = R.string.ui_mode_now_auto;
+        }
+        Toast.makeText(this, toast, Toast.LENGTH_SHORT).show();
+        Log.i("mirror: ui_mode cycled to %s effective=%s",
+                Ui.uiModeLabel(this), Ui.isTablet(this) ? "tablet" : "phone");
+        // Recreate so phone/tablet chrome (tools visibility) re-binds cleanly.
+        Intent intent = getIntent();
+        finish();
+        startActivity(intent);
+        overridePendingTransition(0, 0);
+    }
+
     // ---- minimal expandable mirror actions + blind unlock ----
 
     private void setupMirrorActions() {
@@ -882,6 +1265,10 @@ public final class Mirror extends Activity {
             unlockFab.setVisibility(state == State.CONNECTED ? View.VISIBLE : View.GONE);
         }
         if (disconnectBtn != null) disconnectBtn.setVisibility(View.VISIBLE);
+        if (uiModeCycleBtn != null) uiModeCycleBtn.setVisibility(View.VISIBLE);
+        if (splitSwapBtn != null) {
+            splitSwapBtn.setVisibility(Ui.isTablet(this) ? View.VISIBLE : View.GONE);
+        }
         insetMirrorControls();
     }
 

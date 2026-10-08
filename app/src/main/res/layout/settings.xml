@@ -367,6 +367,63 @@
                 android:layout_height="wrap_content"
                 android:text="@string/display"/>
 
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="@dimen/space_sm"
+                android:text="@string/ui_mode"/>
+
+            <RadioGroup
+                android:id="@+id/ui_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/ui_mode_auto"
+                    style="@style/RadioOption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/ui_mode_auto"/>
+
+                <RadioButton
+                    android:id="@+id/ui_mode_phone"
+                    style="@style/RadioOption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/ui_mode_phone"/>
+
+                <RadioButton
+                    android:id="@+id/ui_mode_tablet"
+                    style="@style/RadioOption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/ui_mode_tablet"/>
+
+            </RadioGroup>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="@dimen/space_sm"
+                android:text="@string/ui_mode_help"/>
+
+            <CheckBox
+                android:id="@+id/tools_on_left"
+                style="@style/RadioOption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/split_tools_left"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="@dimen/space_sm"
+                android:text="@string/split_swap_help"/>
+
             <CheckBox
                 android:id="@+id/clipboard_sync"
                 style="@style/RadioOption"

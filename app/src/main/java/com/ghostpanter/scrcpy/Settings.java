@@ -21,6 +21,14 @@ public final class Settings {
     public static final String CLIPBOARD       = "clipboard";       // two-way clipboard sync
     public static final String ROOT_CAPTURE   = "root_capture";    // su-elevate server
     public static final String PREFER_SHIZUKU = "prefer_shizuku";  // use Shizuku when available
+    /** UI mode override: auto / force phone / force tablet. */
+    public static final String UI_MODE = "ui_mode";
+    /** Split pane: tools on left (true) or preview|tools default (false). */
+    public static final String TOOLS_ON_LEFT = "tools_on_left";
+
+    public static final int UI_MODE_AUTO = 0;
+    public static final int UI_MODE_PHONE = 1;
+    public static final int UI_MODE_TABLET = 2;
 
     public static final String DEFAULT_VIDEO_CODEC    = "h264";
     public static final String DEFAULT_AUDIO_CODEC    = "opus";
@@ -41,6 +49,8 @@ public final class Settings {
     // FLAG_SECURE; do not auto-force Magisk secure-elevate on connect.
     public static final boolean DEFAULT_ROOT_CAPTURE  = false;
     public static final boolean DEFAULT_PREFER_SHIZUKU = true;
+    public static final int DEFAULT_UI_MODE = UI_MODE_AUTO;
+    public static final boolean DEFAULT_TOOLS_ON_LEFT = false;
 
     private Settings() {}
 
@@ -168,6 +178,47 @@ public final class Settings {
         prefs(ctx).edit().putBoolean(PREFER_SHIZUKU, v).apply();
     }
 
+    /** @return {@link #UI_MODE_AUTO}, {@link #UI_MODE_PHONE}, or {@link #UI_MODE_TABLET}. */
+    public static int uiMode(Context ctx) {
+        int value = integer(ctx, UI_MODE, DEFAULT_UI_MODE);
+        switch (value) {
+            case UI_MODE_AUTO:
+            case UI_MODE_PHONE:
+            case UI_MODE_TABLET:
+                return value;
+            default:
+                return DEFAULT_UI_MODE;
+        }
+    }
+
+    public static void setUiMode(Context ctx, int mode) {
+        if (mode != UI_MODE_AUTO && mode != UI_MODE_PHONE && mode != UI_MODE_TABLET) {
+            throw new IllegalArgumentException("invalid ui mode");
+        }
+        prefs(ctx).edit().putInt(UI_MODE, mode).apply();
+    }
+
+    /** Cycle Auto → Phone → Tablet → Auto. Returns the new mode. */
+    public static int cycleUiMode(Context ctx) {
+        int next = (uiMode(ctx) + 1) % 3;
+        setUiMode(ctx, next);
+        return next;
+    }
+
+    /** Tablet split: tools pane on the left when true; preview|tools when false. */
+    public static boolean toolsOnLeft(Context ctx) {
+        return bool(ctx, TOOLS_ON_LEFT, DEFAULT_TOOLS_ON_LEFT);
+    }
+
+    public static void setToolsOnLeft(Context ctx, boolean left) {
+        prefs(ctx).edit().putBoolean(TOOLS_ON_LEFT, left).apply();
+    }
+
+    public static boolean toggleToolsOnLeft(Context ctx) {
+        boolean next = !toolsOnLeft(ctx);
+        setToolsOnLeft(ctx, next);
+        return next;
+    }
 
     private static String string(Context ctx, String key, String fallback) {
         try {

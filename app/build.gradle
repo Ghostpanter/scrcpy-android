@@ -6,19 +6,19 @@ import java.security.MessageDigest
 
 android {
     namespace = 'com.ghostpanter.scrcpy'
-    compileSdk 37
+    compileSdk 34
     // Pin build-tools explicitly so the aapt2/zipalign/d8 toolchain is
     // fixed and builds stay reproducible, not whatever AGP defaults to.
-    // 35.0.0 is AGP 8.13's supported default.
-    buildToolsVersion '37.0.0'
+    // compileSdk is 34 for ColorOS; build-tools 35.0.0 remains AGP-safe.
+    buildToolsVersion '35.0.0'
 
     defaultConfig {
         // The published package id. Immutable across releases.
         applicationId 'com.ghostpanter.scrcpy'
         minSdk 28
-        targetSdk 37
-        versionCode 30
-        versionName '0.5.19-ghostpanter'
+        targetSdk 34
+        versionCode 39
+        versionName '0.5.28-tablet'
     }
 
     // AGP otherwise embeds a Google-signed dependency-metadata blob in the
@@ -45,43 +45,44 @@ android {
                 storePassword System.getenv('KEYSTORE_PASS')
                 keyAlias      System.getenv('KEY_ALIAS')
                 keyPassword   System.getenv('KEY_PASS')
-                // V1+V2: V2 is enough for modern installers, but some OEM
-                // package managers still choke without JAR (V1) signatures.
+                // V1+V2 required for ColorOS / OEM installers. apksigner
+                // reports "v1 scheme: false" when minSdk>=24 even though
+                // META-INF JAR signatures are present and valid — verify
+                // with: apksigner verify --min-sdk-version 23 --verbose
                 v1SigningEnabled true
                 v2SigningEnabled true
             }
         }
     }
 
-    // Ship one ordinary APK containing both supported 64-bit ABIs. arm64
-    // covers physical devices; x86_64 covers emulators and ChromeOS without
-    // introducing split-APK installation logic.
+    // One universal APK (no ABI splits). Every ABI shipped by the native
+    // deps (conscrypt-android, spake2-android) is included:
+    //   armeabi-v7a, arm64-v8a, x86, x86_64
+    // arm64 / armeabi-v7a cover physical devices; x86_64 / x86 cover
+    // emulators and ChromeOS. No Play splits.
     buildTypes {
         debug {
             ndk {
-                abiFilters 'arm64-v8a', 'x86_64'
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
         }
         release {
-            // x86_64 is here so the emulator can install and RUN the
-            // minified artifact. Without it no tier ever executed the
-            // variant that ships, and an R8 misconfiguration - a keep
-            // rule that is too narrow, a reflective edge R8 could not
-            // see - would first show up on a user's device. It costs a
-            // second ABI in the APK and buys coverage of the only build
-            // that matters.
+            // ColorOS: do not embed version-control-info.textproto under META-INF
+            // (unprotected by V1 JAR signature; OEM verifiers may reject it).
+            vcsInfo {
+                include false
+            }
+            // 32-bit and x86 are included so 32-bit devices and x86
+            // emulators can install and RUN the minified artifact, not
+            // only arm64 phones and x86_64 emulators.
             //
-            // This is why the APK is ~7.5 MB while the dex shrank: it
-            // carries two copies of libconscrypt_jni.so and libspake2.so,
-            // stored uncompressed and 16 KiB aligned for Android 15+ page
-            // sizes. Uncompressed native libraries inflate the download
-            // and shrink the installation, because they are mapped from
-            // the APK instead of being extracted. A single-ABI build is
-            // about 3.5 MB; splits would give users that without giving
-            // up the emulator coverage, and are the obvious next step if
-            // download size starts to matter.
+            // The APK carries one copy of libconscrypt_jni.so and
+            // libspake2.so per ABI (four ABIs).
+            // ColorOS-compat builds use jniLibs.useLegacyPackaging so the
+            // libs are compressed and extracted on install (extractNativeLibs
+            // true). Do not switch to ABI splits: one universal APK.
             ndk {
-                abiFilters 'arm64-v8a', 'x86_64'
+                abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
             minifyEnabled   true
             shrinkResources = true
@@ -103,16 +104,29 @@ android {
     }
 
     packaging {
+        // ColorOS / OEM PackageManagers often fail INSTALL_FAILED_INVALID_APK
+        // when extractNativeLibs=false and page-aligned uncompressed .so files
+        // are present (16 KiB align is correct for AOSP, but ColorOS installers
+        // have historically choked). Legacy packaging compresses jniLibs and
+        // sets extractNativeLibs=true so the system extracts them on install.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         // bouncycastle (transitive via :adb) is the dominant source of
         // dead weight in the APK. Each entry below is dead code/data for
         // our use case (we only call BC's asn1, crypto, util.encoders):
         //   - picnic post-quantum lookup tables: ~1.2 MB of .properties
         //   - cert-path-reviewer i18n messages: ~92 KB, en+de only
         //   - duplicate META-INF licenses/notices: ordinary AGP cleanup
+        // Also drop AGP metadata blobs under META-INF/ that are not covered
+        // by the V1 JAR signature (apksigner warns; some OEM verifiers are
+        // stricter about unprotected META-INF entries).
         resources.excludes += [
             'META-INF/LICENSE*',
             'META-INF/NOTICE*',
             'META-INF/versions/9/OSGI-INF/MANIFEST.MF',
+            'META-INF/com/android/build/gradle/app-metadata.properties',
+            'META-INF/version-control-info.textproto',
             'org/bouncycastle/pqc/crypto/picnic/**',
             'org/bouncycastle/pqc/legacy/picnic/**',
             'org/bouncycastle/x509/CertPathReviewerMessages*.properties',

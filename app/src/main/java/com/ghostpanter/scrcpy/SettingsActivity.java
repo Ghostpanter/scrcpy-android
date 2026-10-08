@@ -31,6 +31,7 @@ public final class SettingsActivity extends Activity {
         RadioGroup maxSizeGroup = findViewById(R.id.max_size);
         RadioGroup bitRateGroup = findViewById(R.id.video_bit_rate);
         RadioGroup maxFpsGroup  = findViewById(R.id.max_fps);
+        RadioGroup uiModeGroup  = findViewById(R.id.ui_mode);
 
         syncUiFromSettings();
 
@@ -86,6 +87,25 @@ public final class SettingsActivity extends Activity {
             else return;
             Settings.setMaxFps(this, v);
             Log.i("settings: max_fps=%d", v);
+        });
+
+        uiModeGroup.setOnCheckedChangeListener((g, id) -> {
+            int mode = Settings.UI_MODE_AUTO;
+            if (id == R.id.ui_mode_phone) mode = Settings.UI_MODE_PHONE;
+            else if (id == R.id.ui_mode_tablet) mode = Settings.UI_MODE_TABLET;
+            Settings.setUiMode(this, mode);
+            Log.i("settings: ui_mode=%s effective=%s",
+                    Ui.uiModeLabel(this), Ui.isTablet(this) ? "tablet" : "phone");
+            Toast.makeText(this, R.string.ui_mode_apply_hint, Toast.LENGTH_SHORT).show();
+        });
+
+        CheckBox toolsOnLeftBox = findViewById(R.id.tools_on_left);
+        toolsOnLeftBox.setOnCheckedChangeListener((b, checked) -> {
+            Settings.setToolsOnLeft(this, checked);
+            Log.i("settings: tools_on_left=%b", checked);
+            Toast.makeText(this, checked
+                    ? R.string.split_now_tools_preview
+                    : R.string.split_now_preview_tools, Toast.LENGTH_SHORT).show();
         });
 
         findViewById(R.id.view_logs).setOnClickListener(v ->
@@ -209,6 +229,17 @@ public final class SettingsActivity extends Activity {
         ((CheckBox) findViewById(R.id.clipboard_sync)).setChecked(Settings.clipboardSync(this));
         ((CheckBox) findViewById(R.id.root_capture_secure)).setChecked(Settings.rootCaptureSecure(this));
         ((CheckBox) findViewById(R.id.prefer_shizuku)).setChecked(Settings.preferShizuku(this));
+        switch (Settings.uiMode(this)) {
+            case Settings.UI_MODE_PHONE:
+                ((RadioButton) findViewById(R.id.ui_mode_phone)).setChecked(true);
+                break;
+            case Settings.UI_MODE_TABLET:
+                ((RadioButton) findViewById(R.id.ui_mode_tablet)).setChecked(true);
+                break;
+            default:
+                ((RadioButton) findViewById(R.id.ui_mode_auto)).setChecked(true);
+        }
+        ((CheckBox) findViewById(R.id.tools_on_left)).setChecked(Settings.toolsOnLeft(this));
         refreshShizukuStatus();
     }
 

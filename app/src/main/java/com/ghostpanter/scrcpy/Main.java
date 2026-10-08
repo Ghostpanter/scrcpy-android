@@ -52,7 +52,12 @@ public final class Main extends Activity {
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        // Intentional block: never run inside 卓易通 (HarmonyOS NEXT container).
+        if (ZhuoyitongGuard.blockIfLocal(this)) return;
         setContentView(R.layout.main);
+        // Auto tablet/phone detection (no manual toggle). Used by Server maxSize
+        // and Mirror tools; log once so first-run mode is visible in logcat.
+        Log.i("main: auto-detect %s", Ui.deviceModeSummary(this));
 
         // The IME inset is in the mask too: the window is edge-to-edge, so
         // nothing resizes it when the keyboard opens. The page is one
