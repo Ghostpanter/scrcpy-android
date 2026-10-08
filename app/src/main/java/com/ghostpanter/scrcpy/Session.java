@@ -102,7 +102,6 @@ public final class Session {
     private boolean        stoppedNotified;
     private long           geometryVersion;
     private volatile Viewport pendingViewport;
-    private volatile boolean remoteEnvChecked;
 
     private static final class Viewport {
         final long version;
@@ -305,12 +304,6 @@ public final class Session {
                 return true; // success; the read threads own the live session
             } catch (InterruptedException ie) {
                 return false;
-            } catch (ZhuoyitongGuard.BlockedException blocked) {
-                // Intentional block, not a transient failure: no retries.
-                Log.e("session: controlled device is Zhuoyitong — disconnecting (%s)",
-                        blocked.result.summary());
-                tearDownInstalled();
-                return giveUp(blocked);
             } catch (Exception t) {
                 Log.w("session: bring-up attempt %d/%d failed: %s",
                         attempt + 1, BACKOFF_MS.length, t);
@@ -415,17 +408,6 @@ public final class Session {
         if (endpoint != target) {
             target = endpoint;
             Log.i("session: using rediscovered endpoint %s", endpoint);
-        }
-
-        // Intentional block: refuse controlled devices running in 卓易通
-        // (HarmonyOS NEXT Android container). Probed once per session.
-        if (!remoteEnvChecked) {
-            ZhuoyitongGuard.Result env = ZhuoyitongGuard.checkRemote(new AdbRemote(adb));
-            if (env.detected()) {
-                try { adb.disconnect(); } catch (Exception ignored) {}
-                throw new ZhuoyitongGuard.BlockedException(env);
-            }
-            remoteEnvChecked = true;
         }
 
         Server srv = null;

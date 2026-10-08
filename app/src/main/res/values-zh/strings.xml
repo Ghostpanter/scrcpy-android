@@ -329,8 +329,4 @@
     <string name="debug_error">设备调试失败：%1$s</string>
     <string name="debug_bad_size">请输入有效的宽高</string>
     <string name="debug_bad_dpi">请输入有效的 DPI（72–640）</string>
-    <string name="zyt_title">不支持的运行环境</string>
-    <string name="zyt_exit">退出</string>
-    <string name="zyt_local_blocked">当前环境为卓易通，不支持运行，即将退出。</string>
-    <string name="zyt_remote_blocked">被控设备为卓易通环境，不支持连接，已断开并即将退出。</string>
 </resources>
