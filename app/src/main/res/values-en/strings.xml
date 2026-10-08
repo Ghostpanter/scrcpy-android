@@ -328,4 +328,8 @@
     <string name="debug_error">Device debug failed: %1$s</string>
     <string name="debug_bad_size">Enter a valid width and height</string>
     <string name="debug_bad_dpi">Enter a valid DPI (72–640)</string>
+    <string name="zyt_title">Unsupported environment</string>
+    <string name="zyt_exit">Exit</string>
+    <string name="zyt_local_blocked">Running inside Zhuoyitong (卓易通) is not supported. The app will exit.</string>
+    <string name="zyt_remote_blocked">The controlled device runs Zhuoyitong (卓易通), which is not supported. Disconnected; the app will exit.</string>
 </resources>

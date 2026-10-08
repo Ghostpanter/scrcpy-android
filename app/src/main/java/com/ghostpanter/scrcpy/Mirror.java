@@ -108,6 +108,8 @@ public final class Mirror extends Activity {
     @SuppressWarnings("deprecation")
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        // Restored task after process death can land here directly.
+        if (ZhuoyitongGuard.blockIfLocal(this)) return;
         setContentView(R.layout.mirror);
         // Start CONNECTING with system bars visible so the status pill can
         // clear status/cutout. Immersive hide applies once CONNECTED.
@@ -399,6 +401,12 @@ public final class Mirror extends Activity {
             }
             @Override public void onError(Throwable t) {
                 runOnUiThread(() -> {
+                    if (t instanceof ZhuoyitongGuard.BlockedException) {
+                        // Controlled device is 卓易通: already disconnected; exit.
+                        ZhuoyitongGuard.showAndExit(Mirror.this,
+                                getString(R.string.zyt_remote_blocked));
+                        return;
+                    }
                     if (destroyed || generation != sessionGeneration) return;
                     Toast.makeText(Mirror.this, describe(t), Toast.LENGTH_LONG).show();
                 });
@@ -520,6 +528,7 @@ public final class Mirror extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (target == null) return;
         String host = intent.getStringExtra(EXTRA_HOST);
         int port = intent.getIntExtra(EXTRA_PORT, -1);
         if (host == null || port <= 0 || port > 65535) {
