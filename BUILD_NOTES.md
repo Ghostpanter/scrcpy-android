@@ -1,5 +1,23 @@
 # scrcpy-android (Ghostpanter) — build notes
 
+## 卓易通 block (0.5.28-tablet / vc39)
+
+Intentional: the app refuses to run inside, or connect to, 卓易通 (Zhuoyitong,
+the Android container on HarmonyOS NEXT / HarmonyOS PC). All detection lives in
+`ZhuoyitongGuard.java` (signal list documented in its class comment).
+
+| Where | When | Action |
+| --- | --- | --- |
+| Controller | `App.attachBaseContext` (before providers), then `Main.onCreate` / `Mirror.onCreate` | Dialog "当前环境为卓易通，不支持运行" → `finishAffinity` + kill process (auto after 3 s) |
+| Controlled device | `Session.bringUpAttempt` right after `adb connect` (once per session) | adb shell probe → disconnect, no retries → dialog "被控设备为卓易通环境…" → exit |
+
+Strong (any one): kernel string "HongMeng"; cgroup token isulad/zhuoyi/anco;
+mountinfo anco_hmos/isulad/zhuoyi/anco; installer `com.zhuoyi.appstore.lite`
+(local); any prop key/value containing zhuoyi/isulad; build token zhuoyi.
+Weak (need two kinds): cgroup lxc; prop key token anco; build token
+droi/zyt/anco/easyabroad; package `com.zhuoyi.appstore.lite`/`com.droi.*` installed.
+Logcat: `adb logcat -s scrcpy-android | grep zyt:` shows the matched signals.
+
 ## Universal ABI APK (0.5.27-tablet / vc38)
 
 One install package, no Play ABI splits. `ndk.abiFilters` now keeps every ABI

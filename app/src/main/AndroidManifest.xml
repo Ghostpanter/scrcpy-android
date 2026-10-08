@@ -19,6 +19,8 @@
 
     <queries>
         <package android:name="moe.shizuku.privileged.api"/>
+        <!-- ZhuoyitongGuard weak signal G1 (卓易通 store package). -->
+        <package android:name="com.zhuoyi.appstore.lite"/>
     </queries>
 
     <!-- spake2-android has no targetSdk in its manifest. The merger adds
