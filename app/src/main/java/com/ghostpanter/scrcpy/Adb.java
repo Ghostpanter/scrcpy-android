@@ -140,7 +140,39 @@ public final class Adb {
         }
     }
 
+    /** Notified (on the connecting thread) when the target shows "Allow USB debugging?". */
+    public interface AuthPromptListener {
+        void onAwaitingUserAuth(String host, int port);
+    }
+
+    // Default port of legacy `adb tcpip` mode (Android 9/10 without Wireless debugging).
+    public static final int LEGACY_TCPIP_PORT = 5555;
+    // How long to wait for the user to tap "Allow" on the controlled device.
+    static final long USER_AUTH_WAIT_MS = 60_000L;
+    private static final long CONNECT_SLICE_MS = 500L;
+
+    private static volatile AuthPromptListener authPromptListener;
+    private volatile boolean lastLegacyAuth;
+
+    /** Global UI hook; Main / Mirror set it while visible. */
+    public static void setAuthPromptListener(AuthPromptListener l) {
+        authPromptListener = l;
+    }
+
+    /** True when the current/last connection used classic RSA AUTH (adb tcpip). */
+    public boolean isLegacyAuth() {
+        return lastLegacyAuth;
+    }
+
     public synchronized void connect(String host, int port) throws Exception {
+        connect(host, port, null);
+    }
+
+    // Plain TCP + either TLS (Wireless debugging) or classic RSA AUTH
+    // (`adb tcpip 5555`). For RSA AUTH with an unknown key the target shows
+    // "Allow USB debugging?"; extend the wait to USER_AUTH_WAIT_MS then.
+    public synchronized void connect(String host, int port, AuthPromptListener onPrompt)
+            throws Exception {
         validateEndpoint(host, port);
         AdbConnection next = null;
         try {
@@ -153,9 +185,36 @@ public final class Adb {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedException("ADB connect cancelled");
             }
-            if (!next.connect(OP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                throw new IOException("adb connect timed out");
+            boolean ok = next.connect(CONNECT_SLICE_MS, TimeUnit.MILLISECONDS);
+            long start = System.nanoTime();
+            boolean prompted = false;
+            while (!ok) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException("ADB connect cancelled");
+                }
+                long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                if (next.isAwaitingUserAuth() && !prompted) {
+                    prompted = true;
+                    start = System.nanoTime();
+                    elapsed = 0;
+                    Log.i("adb: %s:%d waiting for 'Allow USB debugging' on target", host, port);
+                    AuthPromptListener l = onPrompt != null ? onPrompt : authPromptListener;
+                    if (l != null) {
+                        try { l.onAwaitingUserAuth(host, port); }
+                        catch (RuntimeException e) { Log.w("adb: auth prompt listener: %s", e); }
+                    }
+                }
+                long budget = prompted ? USER_AUTH_WAIT_MS : OP_TIMEOUT_MS;
+                if (elapsed >= budget) {
+                    throw new IOException(prompted
+                            ? "adb auth not allowed on target within " + (USER_AUTH_WAIT_MS / 1000) + " s"
+                            : "adb connect timed out");
+                }
+                ok = next.awaitConnection(Math.min(CONNECT_SLICE_MS, budget - elapsed),
+                        TimeUnit.MILLISECONDS);
             }
+            lastLegacyAuth = next.isLegacyAuth();
+            Log.i("adb: connected %s:%d auth=%s", host, port, lastLegacyAuth ? "rsa(tcpip)" : "tls");
             connection = next;
             next = null;
         } catch (Exception e) {

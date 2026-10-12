@@ -51,6 +51,8 @@ public final class Session {
         default void onElevateWaitingForGrant() {}
         /** DisplayManager rejected SECURE VD on this OEM — show LSPosed tip. */
         default void onSecureOemRejected() {}
+        /** Controlled device API level (ro.build.version.sdk), once per session; 0 if unknown. */
+        default void onRemoteSdk(int sdk) {}
         // Fatal: a retry budget ran out, or the failure was not
         // retriable. Always followed by onStopped().
         void onError(Throwable t);
@@ -427,6 +429,11 @@ public final class Session {
             }
             remoteEnvChecked = true;
         }
+        if (remoteSdk == 0) {
+            remoteSdk = probeRemoteSdk();
+            Log.i("session: controlled device sdk=%d", remoteSdk);
+            if (listener != null) listener.onRemoteSdk(remoteSdk);
+        }
 
         Server srv = null;
         ControlStream cs = null;
@@ -438,6 +445,7 @@ public final class Session {
         boolean installed = false;
         try {
             srv = new Server(ctx, adb);
+            srv.setRemoteSdk(remoteSdk);
             srv.setOnWaitingForGrant(() -> {
                 if (listener != null) listener.onElevateWaitingForGrant();
             });
@@ -516,8 +524,24 @@ public final class Session {
 
     // Wireless-debug TLS connect ports change whenever Wireless debugging is
     // toggled or the phone reboots. On connect failure, rediscover via mDNS.
+    private volatile int remoteSdk;
+
+    // getprop ro.build.version.sdk on the controlled device; 0 when unknown.
+    private int probeRemoteSdk() {
+        try {
+            return Server.parseSdk(new AdbRemote(adb).shell("getprop ro.build.version.sdk"));
+        } catch (Exception e) {
+            Log.w("session: sdk probe failed: %s", e);
+            return 0;
+        }
+    }
+
     private boolean shouldRediscover(Devices.Device endpoint, Exception err) {
         if (endpoint == null || err == null) return false;
+        // Legacy `adb tcpip` endpoint (Android 9/10): fixed port, no
+        // _adb-tls-connect mDNS service exists, so never rescan.
+        if (endpoint.port == Adb.LEGACY_TCPIP_PORT) return false;
+        if (String.valueOf(err.getMessage()).contains("adb auth not allowed")) return false;
         if (err instanceof ConnectException
                 || err instanceof SocketTimeoutException
                 || err instanceof NoRouteToHostException) {

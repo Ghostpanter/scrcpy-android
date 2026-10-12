@@ -56,6 +56,53 @@
 
         </LinearLayout>
 
+        <!-- Direct IP:port connect (legacy adb tcpip, Android 9/10; no pairing). -->
+        <LinearLayout
+            style="@style/Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="@dimen/space_lg">
+
+            <TextView
+                style="@style/SectionHeader"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/direct_connect_title"/>
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/direct_connect_help"/>
+
+            <EditText
+                android:id="@+id/direct_address"
+                style="@style/Field"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_xs"
+                android:hint="@string/direct_address_hint"
+                android:inputType="textUri"
+                android:importantForAutofill="no"/>
+
+            <Button
+                android:id="@+id/direct_connect"
+                style="@style/Button.Primary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:text="@string/direct_connect"/>
+
+            <Button
+                android:id="@+id/direct_howto"
+                style="@style/Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_sm"
+                android:text="@string/direct_howto"/>
+
+        </LinearLayout>
+
         <!-- Pair-first form: pairing dialog address + code, optional connect. -->
         <LinearLayout
             style="@style/Card"

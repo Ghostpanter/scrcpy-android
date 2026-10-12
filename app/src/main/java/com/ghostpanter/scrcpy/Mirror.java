@@ -393,6 +393,16 @@ public final class Mirror extends Activity {
                     showElevateStatus(status);
                 });
             }
+            @Override public void onRemoteSdk(int sdk) {
+                if (sdk > 0 && sdk < 30) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        Toast.makeText(Mirror.this,
+                                getString(R.string.android9_audio_unsupported, sdk),
+                                Toast.LENGTH_LONG).show();
+                    });
+                }
+            }
             @Override public void onSecureOemRejected() {
                 runOnUiThread(() -> {
                     if (destroyed || generation != sessionGeneration) return;
@@ -668,6 +678,25 @@ public final class Mirror extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (tabletTools != null) tabletTools.onActivityResult(requestCode, resultCode, data);
+    }
+
+    // Legacy `adb tcpip` (Android 9/10): tell the user to tap "Allow" on the
+    // controlled device while Adb.connect() waits for the RSA key approval.
+    private final Adb.AuthPromptListener authPrompt = (h, p) -> runOnUiThread(() -> {
+        if (isFinishing() || isDestroyed()) return;
+        Toast.makeText(this, getString(R.string.auth_prompt_hint), Toast.LENGTH_LONG).show();
+    });
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Adb.setAuthPromptListener(authPrompt);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Adb.setAuthPromptListener(null);
     }
 
     @Override

@@ -266,11 +266,38 @@ public class AdbConnection implements Closeable, AdbStream.Transport {
                             break;
                         }
                         case AdbProtocol.A_AUTH: {
-                            throw new IOException("ADB peer requested legacy authentication without TLS");
+                            // Classic RSA AUTH (adbd in `adb tcpip 5555` mode, Android <= 10
+                            // and any adbd without Wireless debugging). Sign the token once;
+                            // if the key is unknown, offer the public key once so the target
+                            // shows "Allow USB debugging?" and wait for CNXN.
+                            if (mIsTls || mConnectionEstablished) {
+                                throw new IOException("Unexpected AUTH after TLS/CNXN");
+                            }
+                            if (msg.arg0 != AdbProtocol.ADB_AUTH_TOKEN || msg.payload == null) {
+                                throw new IOException("Invalid AUTH request type " + msg.arg0);
+                            }
+                            mLegacyAuth = true;
+                            if (!mSentSignature) {
+                                mSentSignature = true;
+                                sendPacket(AdbProtocol.generateAuth(AdbProtocol.ADB_AUTH_SIGNATURE,
+                                        AndroidPubkey.adbAuthSign(mKeyPair.getPrivateKey(), msg.payload)));
+                            } else if (!mSentPublicKey) {
+                                mSentPublicKey = true;
+                                byte[] pub = AndroidPubkey.encodeWithName(
+                                        (java.security.interfaces.RSAPublicKey) mKeyPair.getPublicKey(),
+                                        AUTH_KEY_NAME);
+                                sendPacket(AdbProtocol.generateAuth(AdbProtocol.ADB_AUTH_RSAPUBLICKEY, pub));
+                                synchronized (AdbConnection.this) {
+                                    mAwaitingUserAuth = true;
+                                    AdbConnection.this.notifyAll();
+                                }
+                            }
+                            // Further tokens after the public key: keep waiting for the user.
+                            break;
                         }
                         case AdbProtocol.A_CNXN: {
-                            if (!mIsTls) {
-                                throw new IOException("ADB peer did not negotiate TLS");
+                            if (!mIsTls && !mLegacyAuth) {
+                                throw new IOException("ADB peer did not negotiate TLS or RSA AUTH");
                             }
                             if (msg.arg0 < AdbProtocol.A_VERSION_MIN || msg.arg1 <= 0) {
                                 throw new IOException("Invalid CNXN parameters: version="
@@ -283,6 +310,7 @@ public class AdbConnection implements Closeable, AdbStream.Transport {
                                 mProtocolVersion = Math.min(msg.arg0, mLocalProtocolVersion);
                                 mMaxData = Math.min(msg.arg1, mLocalMaxData);
                                 mConnectionEstablished = true;
+                                mAwaitingUserAuth = false;
                                 AdbConnection.this.notifyAll();
                             }
                             break;
@@ -320,6 +348,24 @@ public class AdbConnection implements Closeable, AdbStream.Transport {
         return mConnectionEstablished;
     }
 
+    /** Name shown next to the key in the target's "Allow USB debugging?" dialog. */
+    private static final String AUTH_KEY_NAME = "scrcpy-ghostpanter";
+
+    private volatile boolean mLegacyAuth;
+    private volatile boolean mSentSignature;
+    private volatile boolean mSentPublicKey;
+    private volatile boolean mAwaitingUserAuth;
+
+    /** True when the peer used classic RSA AUTH instead of TLS (adb tcpip mode). */
+    public boolean isLegacyAuth() {
+        return mLegacyAuth;
+    }
+
+    /** True after our public key was offered and the target is showing the allow dialog. */
+    public boolean isAwaitingUserAuth() {
+        return mAwaitingUserAuth;
+    }
+
     @Override
     public int getMaxData() {
         return mMaxData;
@@ -349,6 +395,19 @@ public class AdbConnection implements Closeable, AdbStream.Transport {
         mConnectionThreadStarted = true;
         mConnectionThread.start();
 
+        return waitForConnection(timeout, Objects.requireNonNull(unit));
+    }
+
+    /**
+     * Keep waiting for CNXN after {@link #connect} returned {@code false}
+     * (e.g. while the target shows "Allow USB debugging?").
+     */
+    public boolean awaitConnection(long timeout, @NonNull TimeUnit unit)
+            throws IOException, InterruptedException {
+        validateTimeout(timeout, unit);
+        if (!mConnectionThreadStarted) {
+            throw new IllegalStateException("connect() must be called first");
+        }
         return waitForConnection(timeout, Objects.requireNonNull(unit));
     }
 

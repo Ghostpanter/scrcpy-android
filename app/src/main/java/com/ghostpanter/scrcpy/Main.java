@@ -46,6 +46,9 @@ public final class Main extends Activity {
     private EditText     pairCode;
     private EditText     connectAddress;
     private EditText     reconnectIp;
+    private EditText     directAddress;
+    private Button       directConnectButton;
+    private static final String PREF_LAST_DIRECT = "last_direct_endpoint";
     private Runnable     pendingAfterNearby;
     private boolean      openMirrorAfterReconnect = true;
 
@@ -73,12 +76,26 @@ public final class Main extends Activity {
         pairButton           = findViewById(R.id.pair);
         discoverPairButton   = findViewById(R.id.discover_pairing);
         reconnectByIpButton  = findViewById(R.id.reconnect_by_ip);
+        directAddress        = findViewById(R.id.direct_address);
+        directConnectButton  = findViewById(R.id.direct_connect);
         View settingsBtn     = findViewById(R.id.settings);
         deviceList  = findViewById(R.id.devices);
         devicesEmpty = findViewById(R.id.devices_empty);
 
         settingsBtn.setOnClickListener(v -> startActivity(
                 new Intent(this, SettingsActivity.class)));
+        String lastDirect = Settings.prefs(this).getString(PREF_LAST_DIRECT, "");
+        if (!TextUtils.isEmpty(lastDirect)) directAddress.setText(lastDirect);
+        findViewById(R.id.direct_howto).setOnClickListener(v -> showDirectHowto());
+        directConnectButton.setOnClickListener(v -> {
+            if (adb == null) return;
+            Devices.Device d = parseDirectAddress(directAddress.getText().toString());
+            if (d == null) {
+                Toast.makeText(this, R.string.bad_direct_address, Toast.LENGTH_LONG).show();
+                return;
+            }
+            startDirectConnect(d);
+        });
         findViewById(R.id.pair_qr).setOnClickListener(v ->
                 startActivity(new Intent(this, QrPair.class)));
 
@@ -96,6 +113,7 @@ public final class Main extends Activity {
         pairButton.setEnabled(false);
         discoverPairButton.setEnabled(false);
         reconnectByIpButton.setEnabled(false);
+        directConnectButton.setEnabled(false);
         new Thread(() -> {
             try {
                 Adb a = Adb.getInstance(getApplicationContext());
@@ -105,6 +123,7 @@ public final class Main extends Activity {
                     pairButton.setEnabled(true);
                     discoverPairButton.setEnabled(true);
                     reconnectByIpButton.setEnabled(true);
+                    directConnectButton.setEnabled(true);
                 });
             } catch (Exception e) {
                 Log.e(e, "adb init failed");
@@ -159,6 +178,25 @@ public final class Main extends Activity {
         });
     }
 
+    // Legacy `adb tcpip` (Android 9/10): tell the user to tap "Allow" on the
+    // controlled device while Adb.connect() waits for the RSA key approval.
+    private final Adb.AuthPromptListener authPrompt = (h, p) -> runOnUiThread(() -> {
+        if (isFinishing() || isDestroyed()) return;
+        Toast.makeText(this, getString(R.string.auth_prompt_hint), Toast.LENGTH_LONG).show();
+    });
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Adb.setAuthPromptListener(authPrompt);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Adb.setAuthPromptListener(null);
+    }
+
     private void prefillReconnectIp(List<Devices.Device> devices) {
         if (devices == null || devices.isEmpty()) return;
         // Prefer the last list entry (most recently upserted).
@@ -182,6 +220,12 @@ public final class Main extends Activity {
     }
 
     private void startReconnectByIp(String ip, boolean openMirror) {
+        // Legacy adb tcpip entry (fixed 5555): connect directly, no mDNS scan.
+        Devices.Device legacy = savedLegacyFor(ip);
+        if (legacy != null) {
+            startDirectConnect(legacy);
+            return;
+        }
         setBusy(true);
         ensureNearby(() -> {
                     Toast.makeText(this, R.string.discovering_connect, Toast.LENGTH_SHORT).show();
@@ -285,6 +329,7 @@ public final class Main extends Activity {
         pairButton.setEnabled(enable);
         discoverPairButton.setEnabled(enable);
         reconnectByIpButton.setEnabled(enable);
+        directConnectButton.setEnabled(enable);
     }
 
     private void reenableButtons() {
@@ -408,6 +453,77 @@ public final class Main extends Activity {
         }
     }
 
+    static Devices.Device parseDirectAddress(String raw) {
+        return Devices.parseDirect(raw, Adb.LEGACY_TCPIP_PORT);
+    }
+
+    private Devices.Device savedLegacyFor(String ip) {
+        try {
+            for (Devices.Device d : Devices.load(this)) {
+                if (d.port != Adb.LEGACY_TCPIP_PORT) continue;
+                String h = AdbDiscovery.isIpv4(d.host) ? AdbDiscovery.normalizeIpv4(d.host) : d.host;
+                if (ip.equals(h)) return d;
+            }
+        } catch (IOException e) {
+            Log.w("direct: load devices: %s", e);
+        }
+        return null;
+    }
+
+    private void showDirectHowto() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.direct_howto_title)
+                .setMessage(R.string.direct_howto_body)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    // Plain ADB TCP + RSA AUTH (adb tcpip) or TLS - whatever the target speaks.
+    // No pairing, no mDNS. Saves host:port and opens Mirror on success.
+    private void startDirectConnect(Devices.Device d) {
+        if (adb == null) return;
+        setBusy(true);
+        directAddress.setText(d.toString());
+        Toast.makeText(this, getString(R.string.direct_connecting, d.toString()),
+                Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                adb.connect(d.host, d.port, authPrompt);
+                try { adb.disconnect(); } catch (Exception ignored) {}
+                List<Devices.Device> updated = Devices.upsertHost(getApplicationContext(), d);
+                Settings.prefs(this).edit().putString(PREF_LAST_DIRECT, d.toString()).apply();
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    showDevices(updated);
+                    if (AdbDiscovery.isIpv4(d.host)) {
+                        reconnectIp.setText(AdbDiscovery.normalizeIpv4(d.host));
+                    }
+                    Toast.makeText(this, getString(R.string.direct_ok, d.toString()),
+                            Toast.LENGTH_SHORT).show();
+                    reenableButtons();
+                    Intent i = new Intent(this, Mirror.class);
+                    i.putExtra(Mirror.EXTRA_HOST, d.host);
+                    i.putExtra(Mirror.EXTRA_PORT, d.port);
+                    startActivity(i);
+                });
+            } catch (Exception e) {
+                Log.e(e, "direct connect %s failed", d);
+                try { adb.disconnect(); } catch (Exception ignored) {}
+                String msg = String.valueOf(e.getMessage());
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (msg.contains("adb auth not allowed")) {
+                        Toast.makeText(this, R.string.auth_denied, Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, getString(R.string.direct_failed, msg),
+                                Toast.LENGTH_LONG).show();
+                    }
+                    reenableButtons();
+                });
+            }
+        }, "direct-connect").start();
+    }
+
     // Rebuild the saved-device rows. There is no adapter: the whole page
     // is one ScrollView, a ListView cannot measure itself inside one, and
     // a handful of rows does not need recycling.
@@ -452,6 +568,10 @@ public final class Main extends Activity {
 
     private void rediscoverPortForDevice(Devices.Device d) {
         if (adb == null) return;
+        if (d.port == Adb.LEGACY_TCPIP_PORT) {
+            startDirectConnect(d);
+            return;
+        }
         String host = d.host;
         String ip = AdbDiscovery.normalizeIpv4(host);
         if (ip == null) {

@@ -12,7 +12,10 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Locale;
 
@@ -31,6 +34,30 @@ final class AndroidPubkey {
      * Size of the RSA modulus in words.
      */
     public static final int ANDROID_PUBKEY_MODULUS_SIZE_WORDS = ANDROID_PUBKEY_MODULUS_SIZE / 4;
+
+    /** DER DigestInfo prefix for SHA-1 (RFC 8017 sec. 9.2 note 1). */
+    private static final byte[] SHA1_DIGEST_INFO = {
+            0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14};
+
+    /**
+     * Legacy ADB AUTH: adbd verifies the 20-byte token as if it were a SHA-1
+     * digest (RSA_verify(NID_sha1, token, ...)). Produce the matching PKCS#1
+     * v1.5 signature with NONEwithRSA over DigestInfo(SHA-1) || token.
+     */
+    @NonNull
+    public static byte[] adbAuthSign(@NonNull PrivateKey privateKey, @NonNull byte[] token)
+            throws GeneralSecurityException {
+        if (token.length != 20) {
+            throw new GeneralSecurityException("ADB AUTH token must be 20 bytes, got " + token.length);
+        }
+        byte[] digestInfo = new byte[SHA1_DIGEST_INFO.length + token.length];
+        System.arraycopy(SHA1_DIGEST_INFO, 0, digestInfo, 0, SHA1_DIGEST_INFO.length);
+        System.arraycopy(token, 0, digestInfo, SHA1_DIGEST_INFO.length, token.length);
+        Signature sig = Signature.getInstance("NONEwithRSA");
+        sig.initSign(privateKey);
+        sig.update(digestInfo);
+        return sig.sign();
+    }
 
     /**
      * Converts a standard RSAPublicKey object to the special ADB format. Available since 4.2.2.

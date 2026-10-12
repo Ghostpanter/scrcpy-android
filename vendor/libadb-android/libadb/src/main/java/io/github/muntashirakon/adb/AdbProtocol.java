@@ -111,6 +111,19 @@ final class AdbProtocol {
         return MAX_PAYLOAD_V1;
     }
 
+    /** AUTH arg0: the device sends a 20-byte random token to sign. */
+    public static final int ADB_AUTH_TOKEN = 1;
+    /** AUTH arg0: we reply with the RSA signature of that token. */
+    public static final int ADB_AUTH_SIGNATURE = 2;
+    /** AUTH arg0: we offer our public key (device shows "Allow USB debugging?"). */
+    public static final int ADB_AUTH_RSAPUBLICKEY = 3;
+
+    /** Classic (pre-TLS) RSA AUTH reply, used by adbd in `adb tcpip` mode. */
+    @NonNull
+    public static byte[] generateAuth(int type, @NonNull byte[] data) {
+        return generateMessage(A_AUTH, type, 0, data);
+    }
+
     public static int getProtocolVersion(int api) {
         if (api >= Build.VERSION_CODES.P) {
             return A_VERSION_SKIP_CHECKSUM;

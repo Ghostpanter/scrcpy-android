@@ -82,6 +82,19 @@ public final class Devices {
         return new Device(host, p);
     }
 
+    // Direct-connect field: "host:port" as parseAddress, or a bare host /
+    // IPv4 which gets defaultPort (5555 for legacy `adb tcpip`).
+    public static Device parseDirect(String s, int defaultPort) {
+        if (s == null) return null;
+        String t = s.trim();
+        if (t.isEmpty()) return null;
+        Device d = parseAddress(t);
+        if (d != null) return d;
+        if (t.indexOf(':') >= 0 || !validHost(t)) return null;
+        if (defaultPort < 1 || defaultPort > 65535) return null;
+        return new Device(t, defaultPort);
+    }
+
     // Digits only, 1-65535. Returns -1 if it is not a usable port.
     // Integer.parseInt() alone would accept "+5555" and " 5555".
     public static int parsePort(String s) {

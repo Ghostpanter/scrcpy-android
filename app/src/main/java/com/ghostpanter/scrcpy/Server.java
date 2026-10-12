@@ -866,9 +866,38 @@ public final class Server {
         return String.format(Locale.ROOT, "%08x", v);
     }
 
+    // Controlled-device API level (0 = unknown). Used to keep server args
+    // valid on old targets (Android 9 = 28).
+    private int remoteSdk;
+
+    public void setRemoteSdk(int sdk) { remoteSdk = sdk; }
+
+    public static int parseSdk(String out) {
+        if (out == null) return 0;
+        String t = out.trim();
+        if (!t.matches("[0-9]{1,3}")) return 0;
+        int v = Integer.parseInt(t);
+        return v >= 1 && v <= 200 ? v : 0;
+    }
+
+    // Video codec actually requested from the server for this target.
+    // AV1 hardware encoders only exist on recent devices; H.265 encoders are
+    // unreliable before Android 10 (API 29). Fall back to H.264 there so
+    // Android 9 targets never fail on "encoder not found".
+    static String effectiveVideoCodec(String requested, int sdk) {
+        if (sdk <= 0 || requested == null) return requested;
+        if ("av1".equals(requested) && sdk < 34) return "h264";
+        if ("h265".equals(requested) && sdk < 29) return "h264";
+        return requested;
+    }
+
     /** Args after `app_process /` (no CLASSPATH / no app_process). */
     private String buildServerArgs(String version, String scid) {
-        String videoCodec = Settings.videoCodec(ctx);
+        String videoCodec = effectiveVideoCodec(Settings.videoCodec(ctx), remoteSdk);
+        if (!videoCodec.equals(Settings.videoCodec(ctx))) {
+            Log.i("server: target sdk=%d, video codec %s -> %s", remoteSdk,
+                    Settings.videoCodec(ctx), videoCodec);
+        }
         String audioCodec = Settings.audioCodec(ctx);
         int maxSize     = Settings.maxSize(ctx);
         // Tablet mode (Ui.isTablet): prefer controlled-device native resolution
@@ -885,6 +914,10 @@ public final class Server {
         args.add("scid=" + scid);
         args.add("log_level=info");
         args.add("video=true");
+        // Keep audio=true even on API < 30: scrcpy-server still accepts the
+        // audio socket there and immediately writes a "disabled" marker
+        // (AudioEncoder: "not supported before Android 11"), which keeps the
+        // video/audio/control accept order this client relies on.
         args.add("audio=true");
         args.add("control=true");
         args.add("video_codec=" + videoCodec);
